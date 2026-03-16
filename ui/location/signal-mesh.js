@@ -39,6 +39,11 @@ var SM_NODE_STATUS_COLORS = {
   error:        '#F44336'
 };
 
+var SM_PC_NODE_COLORS = {
+  connected:    '#00BCD4',   // cyan for connected PC monitors
+  disconnected: '#607D8B'    // blue-grey for disconnected
+};
+
 // Contour color stops: maps RSSI dBm to [r,g,b]
 // -30 bright cyan, -50 blue, -70 dark indigo, -80 nearly invisible
 var SM_CONTOUR_COLORS = {
@@ -280,8 +285,8 @@ var SignalMeshRenderer = (function() {
   };
 
   /**
-   * Update ESP32 node status.
-   * @param {Array<{id:string, status:string}>} nodes
+   * Update node connection status (ESP32 or PC-monitor).
+   * @param {Array<{id:string, status:string, connected:boolean}>} nodes
    */
   SignalMeshRenderer.prototype.updateNodes = function(nodes) {
     if (!Array.isArray(nodes)) return;
@@ -1317,13 +1322,106 @@ var SignalMeshRenderer = (function() {
   };
 
   // =========================================================================
-  // Layer: ESP32 Node markers (with trilateration indicator)
+  // Layer: Node markers — ESP32 + PC Monitor (with trilateration indicator)
   // =========================================================================
+
+  /**
+   * Draw a small laptop/monitor icon for pc-monitor type nodes.
+   * @private
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} cx - center x on canvas
+   * @param {number} cy - center y on canvas
+   * @param {string} color - fill color
+   * @param {boolean} isConnected
+   */
+  SignalMeshRenderer.prototype._drawPcMonitorIcon = function(ctx, cx, cy, color, isConnected) {
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Outer glow for connected
+    if (isConnected) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+    }
+
+    // Screen body (rectangle with rounded top)
+    var sw = 16;  // screen width
+    var sh = 11;  // screen height
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(-sw / 2 + 2, -sh / 2);
+    ctx.lineTo(sw / 2 - 2, -sh / 2);
+    ctx.quadraticCurveTo(sw / 2, -sh / 2, sw / 2, -sh / 2 + 2);
+    ctx.lineTo(sw / 2, sh / 2);
+    ctx.lineTo(-sw / 2, sh / 2);
+    ctx.lineTo(-sw / 2, -sh / 2 + 2);
+    ctx.quadraticCurveTo(-sw / 2, -sh / 2, -sw / 2 + 2, -sh / 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Inner screen (dark inset)
+    var inset = 2;
+    ctx.fillStyle = isConnected ? 'rgba(0,20,30,0.7)' : 'rgba(30,30,30,0.6)';
+    ctx.fillRect(-sw / 2 + inset, -sh / 2 + inset, sw - inset * 2, sh - inset * 2 - 1);
+
+    // Screen content indicator (small bars for connected)
+    if (isConnected) {
+      ctx.fillStyle = smHexToRgba(color, 0.5);
+      ctx.fillRect(-3, -sh / 2 + inset + 1, 6, 2);
+      ctx.fillRect(-2, -sh / 2 + inset + 4, 4, 1);
+    }
+
+    // Stand/base
+    ctx.fillStyle = color;
+    ctx.fillRect(-3, sh / 2, 6, 2);
+    ctx.fillRect(-5, sh / 2 + 2, 10, 2);
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(-sw / 2, -sh / 2, sw, sh);
+
+    ctx.restore();
+  };
+
+  /**
+   * Draw a standard ESP32 square marker.
+   * @private
+   */
+  SignalMeshRenderer.prototype._drawEsp32Icon = function(ctx, cx, cy, color, isConnected) {
+    var nodeSize = 10;
+
+    // Outer glow for connected
+    if (isConnected) {
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.rect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Square marker
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
+
+    // Inner lighter square
+    ctx.fillStyle = smHexToRgba(color, 0.3);
+    var inner = nodeSize * 0.4;
+    ctx.fillRect(cx - inner / 2, cy - inner / 2, inner, inner);
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
+  };
 
   /** @private */
   SignalMeshRenderer.prototype._drawNodes = function() {
     var ctx = this._ctx;
-    var nodeSize = 10;
     var connectedCount = 0;
 
     for (var n = 0; n < this._nodes.length; n++) {
@@ -1332,11 +1430,20 @@ var SignalMeshRenderer = (function() {
       var cx = c[0];
       var cy = c[1];
       var status = node.status || 'disconnected';
-      var color = SM_NODE_STATUS_COLORS[status] || SM_NODE_STATUS_COLORS.disconnected;
+      var isPcMonitor = (node.type === 'pc-monitor');
+      var isConnected = (status === 'connected');
 
-      if (status === 'connected') connectedCount++;
+      // Pick color palette based on node type
+      var color;
+      if (isPcMonitor) {
+        color = isConnected ? SM_PC_NODE_COLORS.connected : SM_PC_NODE_COLORS.disconnected;
+      } else {
+        color = SM_NODE_STATUS_COLORS[status] || SM_NODE_STATUS_COLORS.disconnected;
+      }
 
-      // Dashed line to each connected AP with RSSI label
+      if (isConnected) connectedCount++;
+
+      // Dashed line to each AP with RSSI label
       for (var a = 0; a < this._accessPoints.length; a++) {
         var ap = this._accessPoints[a];
         var apC = this._worldToCanvas(ap.x, ap.y);
@@ -1347,8 +1454,8 @@ var SignalMeshRenderer = (function() {
         ctx.beginPath();
         ctx.moveTo(apC[0], apC[1]);
         ctx.lineTo(cx, cy);
-        ctx.strokeStyle = status === 'connected'
-          ? 'rgba(76,175,80,0.3)'
+        ctx.strokeStyle = isConnected
+          ? (isPcMonitor ? 'rgba(0,188,212,0.3)' : 'rgba(76,175,80,0.3)')
           : 'rgba(158,158,158,0.15)';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
@@ -1359,8 +1466,8 @@ var SignalMeshRenderer = (function() {
         var midX = (apC[0] + cx) / 2;
         var midY = (apC[1] + cy) / 2;
         ctx.font = SM_TINY_FONT;
-        ctx.fillStyle = status === 'connected'
-          ? 'rgba(76,175,80,0.6)'
+        ctx.fillStyle = isConnected
+          ? (isPcMonitor ? 'rgba(0,188,212,0.6)' : 'rgba(76,175,80,0.6)')
           : 'rgba(158,158,158,0.4)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
@@ -1373,39 +1480,40 @@ var SignalMeshRenderer = (function() {
         ctx.restore();
       }
 
-      // Outer glow for connected
-      if (status === 'connected') {
-        ctx.save();
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
-        ctx.beginPath();
-        ctx.rect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.restore();
+      // Draw the appropriate node icon based on type
+      if (isPcMonitor) {
+        this._drawPcMonitorIcon(ctx, cx, cy, color, isConnected);
+      } else {
+        this._drawEsp32Icon(ctx, cx, cy, color, isConnected);
       }
 
-      // Square marker
-      ctx.fillStyle = color;
-      ctx.fillRect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
+      // Label: node name — offset to avoid overlapping with AP label
+      var labelOffsetY = isPcMonitor ? 14 : 10; // PC monitor icon is taller
+      // Check proximity to each AP and push label further if too close
+      var tooCloseToAp = false;
+      for (var la = 0; la < this._accessPoints.length; la++) {
+        var lapC = this._worldToCanvas(this._accessPoints[la].x, this._accessPoints[la].y);
+        if (Math.abs(cx - lapC[0]) < 50 && Math.abs(cy - lapC[1]) < 50) {
+          tooCloseToAp = true;
+          break;
+        }
+      }
+      if (tooCloseToAp) labelOffsetY += 20; // push label further down if near AP
 
-      // Inner lighter square
-      ctx.fillStyle = smHexToRgba(color, 0.3);
-      var inner = nodeSize * 0.4;
-      ctx.fillRect(cx - inner / 2, cy - inner / 2, inner, inner);
-
-      // Border
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cx - nodeSize / 2, cy - nodeSize / 2, nodeSize, nodeSize);
-
-      // Label: node name
       ctx.save();
       ctx.font = SM_TINY_FONT;
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillStyle = isPcMonitor
+        ? smHexToRgba(color, 0.8)
+        : 'rgba(255,255,255,0.6)';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(node.name || node.id, cx, cy + nodeSize / 2 + 5);
+      ctx.fillText(node.name || node.id, cx, cy + labelOffsetY);
+
+      // Show node type label for PC monitors
+      if (isPcMonitor) {
+        ctx.fillStyle = smHexToRgba(color, 0.45);
+        ctx.fillText('PC Monitor', cx, cy + labelOffsetY + 11);
+      }
       ctx.restore();
     }
 
@@ -1417,7 +1525,6 @@ var SignalMeshRenderer = (function() {
       var triText = triActive ? 'Trilateration: Active' : 'Trilateration: Inactive';
 
       // Position below the status overlay area (top-left)
-      var canvasW = this._canvas.width / this._dpr;
       var badgeX = 12;
       var badgeY = 120; // Below the status overlay
 
@@ -1562,9 +1669,16 @@ var SignalMeshRenderer = (function() {
     var titleH = 18;
     var legendW = 170;
 
-    // Count entries: title + signal levels + divider + detection states + divider + node statuses
+    // Check if any pc-monitor nodes exist
+    var hasPcMonitor = false;
+    for (var pci = 0; pci < this._nodes.length; pci++) {
+      if (this._nodes[pci].type === 'pc-monitor') { hasPcMonitor = true; break; }
+    }
+
+    // Count entries: title + signal levels + divider + detection states + divider + node statuses (+ PC Monitor entries)
     var levels = this._visualization.contourLevels || [-30, -40, -50, -60, -70, -80];
     var numEntries = levels.length + 1 + 3 + 1 + 2; // signal + divider + detection(3) + divider + node(2)
+    if (hasPcMonitor) numEntries += 2; // PC Monitor connected + disconnected
 
     // Add tracked device entries if present
     var hasTracked = this._trackedDevices && this._trackedDevices.length > 0;
@@ -1660,7 +1774,7 @@ var SignalMeshRenderer = (function() {
     ctx.stroke();
     ey += lineH;
 
-    // Node statuses
+    // Node statuses (ESP32)
     var nodeStatuses = [
       { color: SM_NODE_STATUS_COLORS.connected, label: 'Connected' },
       { color: SM_NODE_STATUS_COLORS.disconnected, label: 'Disconnected' }
@@ -1676,6 +1790,28 @@ var SignalMeshRenderer = (function() {
       ctx.fillText(nst.label, lx + padX + 16, ey + 2);
 
       ey += lineH;
+    }
+
+    // PC Monitor node statuses (if any exist)
+    if (hasPcMonitor) {
+      var pcStatuses = [
+        { color: SM_PC_NODE_COLORS.connected, label: 'PC Monitor (on)' },
+        { color: SM_PC_NODE_COLORS.disconnected, label: 'PC Monitor (off)' }
+      ];
+
+      for (var ps = 0; ps < pcStatuses.length; ps++) {
+        var pst = pcStatuses[ps];
+        // Draw a small monitor icon in the legend
+        ctx.fillStyle = pst.color;
+        ctx.fillRect(lx + padX, ey + 2, 10, 7);
+        ctx.fillRect(lx + padX + 3, ey + 9, 4, 2);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.textBaseline = 'top';
+        ctx.fillText(pst.label, lx + padX + 16, ey + 2);
+
+        ey += lineH;
+      }
     }
 
     // Tracked devices section (if present)

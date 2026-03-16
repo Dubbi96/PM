@@ -1300,6 +1300,12 @@ class LocationApp {
       if (typeof dash.setObservers === 'function') {
         dash.setObservers(data.observers);
       }
+
+      // Map observer data to config nodes so the renderer can show them as connected.
+      // This is needed in simulation mode where _mapObserversToNodes is not called.
+      if (this.config && this.config.nodes && this.config.nodes.length > 0) {
+        this._mapObserversToNodes(data.observers);
+      }
     }
 
     // Update fusion result
@@ -1361,36 +1367,89 @@ class LocationApp {
       }
     }
 
-    // Update tracked devices from observer simulation (person positions)
-    if (data.persons && data.persons.length > 0 && this.trilateration) {
+    // Generate person positions from fusion zones (server / pc-rssi mode)
+    if (data.fusion && data.fusion.zones) {
+      var personPositions = [];
+      var colorIdx = 0;
+      var colors = ['#00ff88', '#3b82f6', '#f59e0b'];
       var self = this;
-      // Feed person positions to trilateration for visualization
-      data.persons.forEach(function(person) {
-        // Calculate synthetic RSSI for each node based on person position
-        var rssiByNode = {};
-        var nodes = (self.config.accessPoints || []).concat(self.config.nodes || []);
-        nodes.forEach(function(node) {
-          var dx = person.x - node.x;
-          var dy = person.y - node.y;
-          var dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
-          var n = (self.config.signalMap || {}).pathLossExponent || 3.0;
-          var ref = (self.config.signalMap || {}).referenceRssi || -30;
-          rssiByNode[node.id] = ref - 10 * n * Math.log10(dist);
-        });
 
-        self.trilateration.trackDevice(person.id, rssiByNode, {
-          name: person.id.replace('sim-person-', 'Person '),
-          color: person.color
-        });
+      Object.keys(data.fusion.zones).forEach(function(zoneId) {
+        var zone = data.fusion.zones[zoneId];
+        if (zone.occupied) {
+          var pos = self._getZoneCenter(zoneId);
+          if (pos) {
+            personPositions.push({
+              id: 'person-' + zoneId,
+              name: zone.name || zoneId,
+              position: pos,
+              confidence: zone.confidence || 0.5,
+              errorRadius: 2.0,
+              color: colors[colorIdx++ % colors.length]
+            });
+          }
+        }
       });
 
-      var devices = this.trilateration.getTrackedDevices();
       if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
-        var devArray = typeof devices === 'object' && !Array.isArray(devices) ? Object.values(devices) : (devices || []);
-        this.renderer.updateTrackedDevices(devArray);
+        this.renderer.updateTrackedDevices(personPositions);
       }
       if (typeof dash.setTrackedDevices === 'function') {
-        dash.setTrackedDevices(devices);
+        dash.setTrackedDevices(personPositions);
+      }
+    }
+
+    // Update tracked devices from observer simulation (person positions with x,y)
+    if (data.persons && data.persons.length > 0) {
+      var self = this;
+      // Convert simulation persons to tracked device format for direct rendering
+      var simDevices = data.persons.map(function(p) {
+        return {
+          id: p.id,
+          name: p.id.replace('sim-person-', 'Person '),
+          position: { x: p.x, y: p.y },
+          confidence: 0.8,
+          errorRadius: 1.5,
+          color: p.color || '#00ff88'
+        };
+      });
+
+      // Also feed trilateration if available
+      if (this.trilateration) {
+        data.persons.forEach(function(person) {
+          var rssiByNode = {};
+          var nodes = (self.config.accessPoints || []).concat(self.config.nodes || []);
+          nodes.forEach(function(node) {
+            var dx = person.x - node.x;
+            var dy = person.y - node.y;
+            var dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+            var n = (self.config.signalMap || {}).pathLossExponent || 3.0;
+            var ref = (self.config.signalMap || {}).referenceRssi || -30;
+            rssiByNode[node.id] = ref - 10 * n * Math.log10(dist);
+          });
+
+          self.trilateration.trackDevice(person.id, rssiByNode, {
+            name: person.id.replace('sim-person-', 'Person '),
+            color: person.color
+          });
+        });
+
+        var devices = this.trilateration.getTrackedDevices();
+        var devArray = typeof devices === 'object' && !Array.isArray(devices) ? Object.values(devices) : (devices || []);
+        if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
+          this.renderer.updateTrackedDevices(devArray);
+        }
+        if (typeof dash.setTrackedDevices === 'function') {
+          dash.setTrackedDevices(devArray);
+        }
+      } else {
+        // No trilateration — feed person positions directly to renderer
+        if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
+          this.renderer.updateTrackedDevices(simDevices);
+        }
+        if (typeof dash.setTrackedDevices === 'function') {
+          dash.setTrackedDevices(simDevices);
+        }
       }
     }
 
