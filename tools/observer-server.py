@@ -632,8 +632,10 @@ def main():
     )
     reaper.start()
 
-    # Start server
-    server = HTTPServer(("0.0.0.0", args.port), ObserverServer)
+    # Start server (SO_REUSEADDR prevents "Address already in use" after restart)
+    class ReusableHTTPServer(HTTPServer):
+        allow_reuse_address = True
+    server = ReusableHTTPServer(("0.0.0.0", args.port), ObserverServer)
     print(f"Listening on 0.0.0.0:{args.port} ...")
     try:
         server.serve_forever()
