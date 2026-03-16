@@ -1400,6 +1400,9 @@ class LocationApp {
       var configNodes = this.config.nodes || [];
       var presence = data.fusion.presence || 'absent';
 
+      // Prefer server-side estimated position if available
+      var serverPos = data.fusion ? data.fusion.estimated_position : null;
+
       if (presence !== 'absent' && presence !== 'waiting') {
         // Calculate weighted position from ALL observers (not just disturbed)
         var totalWeight = 0;
@@ -1407,9 +1410,13 @@ class LocationApp {
         var weightedY = 0;
         var maxDelta = 0;
 
+        var refRssi = (self.config.signalMap || {}).referenceRssi || -30;
+        var pathLossN = (self.config.signalMap || {}).pathLossExponent || 3.0;
+
         Object.keys(data.fusion.observers_rssi).forEach(function(obsId) {
           var obs = data.fusion.observers_rssi[obsId];
           var absDelta = Math.abs(obs.delta || 0);
+          var variance = obs.variance || 0;
 
           // Find node position for this observer
           var nodePos = null;
@@ -1429,19 +1436,38 @@ class LocationApp {
           }
           if (!nodePos) return;
 
-          // Weight = how much this observer's signal is disturbed
-          // Higher delta → person is closer to the AP-node line for this observer
-          var weight = Math.max(0.01, absDelta);  // minimum weight to prevent division by zero
+          // Use RSSI to estimate distance from AP (log-distance path-loss model)
+          var currentRssi = obs.rssi || -50;
+          var distFromAP = Math.pow(10, (refRssi - currentRssi) / (10 * pathLossN));
+          distFromAP = Math.max(0.5, Math.min(10, distFromAP));  // clamp 0.5-10m
 
-          // The person is on the AP-node line, distance proportional to delta
-          // delta / maxExpectedDelta → 0-1 range → position along the line
-          var t = Math.min(1.0, absDelta / 10.0);  // 10 dBm = person right in the middle
-          var pointX = ap.x + (nodePos.x - ap.x) * 0.5;  // midpoint base
-          var pointY = ap.y + (nodePos.y - ap.y) * 0.5;
+          // Distance between AP and this node
+          var nodeDistFromAP = Math.sqrt(
+            Math.pow(nodePos.x - ap.x, 2) + Math.pow(nodePos.y - ap.y, 2)
+          );
 
-          // Shift toward the observer if delta is very high (person closer to observer)
-          pointX += (nodePos.x - ap.x) * (t - 0.5) * 0.3;
-          pointY += (nodePos.y - ap.y) * (t - 0.5) * 0.3;
+          // t = distFromAP / nodeDistFromAP
+          // t=0 → at AP, t=0.5 → midpoint, t=1 → at node, t>1 → beyond node
+          var t = nodeDistFromAP > 0 ? Math.min(1.5, distFromAP / nodeDistFromAP) : 0.5;
+
+          // Position along the AP-node vector
+          var pointX = ap.x + (nodePos.x - ap.x) * t;
+          var pointY = ap.y + (nodePos.y - ap.y) * t;
+
+          // Perpendicular vector to the AP-node line
+          var perpX = -(nodePos.y - ap.y);
+          var perpY = (nodePos.x - ap.x);
+          var perpLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+          perpX /= perpLen;
+          perpY /= perpLen;
+
+          // Variance causes perpendicular displacement (person not exactly on the line)
+          var perpOffset = Math.sin(Date.now() / 2000) * variance * 0.1;
+          pointX += perpX * perpOffset;
+          pointY += perpY * perpOffset;
+
+          // Weight by delta strength — higher delta means this observer line is more relevant
+          var weight = Math.max(0.01, absDelta);
 
           weightedX += pointX * weight;
           weightedY += pointY * weight;
@@ -1452,6 +1478,12 @@ class LocationApp {
         if (totalWeight > 0) {
           var measuredX = weightedX / totalWeight;
           var measuredY = weightedY / totalWeight;
+
+          // Blend with server's estimated_position when available (70% server, 30% local)
+          if (serverPos && !isNaN(serverPos.x) && !isNaN(serverPos.y)) {
+            measuredX = serverPos.x * 0.7 + measuredX * 0.3;
+            measuredY = serverPos.y * 0.7 + measuredY * 0.3;
+          }
 
           // Add small variance-based jitter for liveliness (person is moving!)
           var variance = 0;

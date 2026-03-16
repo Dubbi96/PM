@@ -248,29 +248,39 @@ class FusionEngine:
         if disturbed:
             total_weight = 0.0
             wx, wy = 0.0, 0.0
+            ap_x, ap_y = 0, 0
+            ref_rssi = -30  # reference RSSI at 1m
+            path_loss_n = 3.0  # indoor path loss exponent
+
             sorted_active_ids = sorted(active.keys())
             for obs_id in disturbed:
                 obs = active.get(obs_id)
                 if not obs:
                     continue
-                idx = (
-                    sorted_active_ids.index(obs_id)
-                    if obs_id in sorted_active_ids
-                    else 0
-                )
-                node_x, node_y = _OBSERVER_POSITIONS[
-                    min(idx, len(_OBSERVER_POSITIONS) - 1)
-                ]
+                idx = sorted_active_ids.index(obs_id) if obs_id in sorted_active_ids else 0
+                node_x, node_y = _OBSERVER_POSITIONS[min(idx, len(_OBSERVER_POSITIONS) - 1)]
 
-                # AP at origin -- midpoint between AP and observer node
-                ap_x, ap_y = 0, 0
-                mid_x = (ap_x + node_x) / 2
-                mid_y = (ap_y + node_y) / 2
+                # Estimate distance from AP using RSSI
+                current_rssi = obs.primary_rssi() or -50
+                dist_from_ap = 10 ** ((ref_rssi - current_rssi) / (10 * path_loss_n))
+                dist_from_ap = max(0.5, min(10.0, dist_from_ap))
 
-                # Weight by absolute delta magnitude
+                # Distance from AP to node
+                node_dist = ((node_x - ap_x)**2 + (node_y - ap_y)**2) ** 0.5
+                if node_dist < 0.1:
+                    node_dist = 1.0
+
+                # t = position along AP-node line (0=AP, 1=node)
+                t = min(1.5, dist_from_ap / node_dist)
+
+                # Point on the AP-node vector
+                px = ap_x + (node_x - ap_x) * t
+                py = ap_y + (node_y - ap_y) * t
+
+                # Weight by delta (higher disturbance = more confidence)
                 weight = max(0.01, abs(obs.primary_delta()))
-                wx += mid_x * weight
-                wy += mid_y * weight
+                wx += px * weight
+                wy += py * weight
                 total_weight += weight
 
             if total_weight > 0:
@@ -535,6 +545,10 @@ class ObserverServer(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", mime_type)
             self.send_header("Content-Length", str(len(content)))
+            if file_path.endswith('.js') or file_path.endswith('.html'):
+                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                self.send_header('Pragma', 'no-cache')
+                self.send_header('Expires', '0')
             self._add_cors_headers()
             self.end_headers()
             self.wfile.write(content)
