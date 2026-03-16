@@ -207,16 +207,26 @@ class LocationApp {
     if (!newData || typeof newData !== 'object') return;
 
     // Merge top-level scalars
+    // When the observer simulator is active and has provided fusion data,
+    // do NOT let the standalone RSSI simulator overwrite presence/confidence —
+    // the observer system is the authoritative source for those.
+    var observerActive = this.observerSimulator && this.observerSimulator.running && this.state.fusionResult;
     var scalarKeys = ['mode', 'connected', 'source', 'serverStatus', 'presence', 'confidence', 'motionScore'];
     var self = this;
     scalarKeys.forEach(function(k) {
-      if (k in newData) self.state[k] = newData[k];
+      if (k in newData) {
+        // Skip presence/confidence if observer system is driving them
+        if (observerActive && (k === 'presence' || k === 'confidence')) return;
+        self.state[k] = newData[k];
+      }
     });
 
     // Merge RSSI metrics
+    // When observer system is active, skip current/baseline/variance — observer provides those
     if (newData.rssi && typeof newData.rssi === 'object') {
       var rssiKeys = ['current', 'baseline', 'variance', 'snr'];
       rssiKeys.forEach(function(k) {
+        if (observerActive && (k === 'current' || k === 'baseline' || k === 'variance')) return;
         if (k in newData.rssi) self.state.rssi[k] = newData.rssi[k];
       });
     }
@@ -1315,13 +1325,16 @@ class LocationApp {
         dash.setFusionResult(data.fusion);
       }
 
-      // Map fusion presence to main presence display
-      if (data.fusion.presence) {
+      // Map fusion presence to main presence state — update both canonical state AND dashboard
+      // so that _updatePresenceDisplay() does not overwrite with stale 'absent'
+      if (data.fusion.presence && data.fusion.presence !== 'waiting') {
+        this.state.presence = data.fusion.presence;
         if (typeof dash.setPresenceState === 'function') {
           dash.setPresenceState(data.fusion.presence);
         }
       }
       if (data.fusion.confidence != null) {
+        this.state.confidence = data.fusion.confidence;
         if (typeof dash.setConfidence === 'function') {
           dash.setConfidence(Math.round(data.fusion.confidence * 100));
         }
@@ -1454,14 +1467,25 @@ class LocationApp {
     }
 
     // Update observer RSSI in diagnostics (pick first observer's RSSI for trend)
+    // Also update this.state.rssi so that _fullUiUpdate/_updateRssiDisplay
+    // does not overwrite with stale standalone-simulator values.
     var observerValues = Object.values(data.observers || {});
     var firstObs = observerValues.length > 0 ? observerValues[0] : null;
     if (firstObs && firstObs.rssi != null) {
+      this.state.rssi.current = Math.round(firstObs.rssi * 100) / 100;
       if (typeof dash.setRssiValue === 'function') {
-        dash.setRssiValue(Math.round(firstObs.rssi * 100) / 100);
+        dash.setRssiValue(this.state.rssi.current);
       }
-      if (firstObs.variance != null && typeof dash.setVariance === 'function') {
-        dash.setVariance(Math.round(firstObs.variance * 100) / 100);
+      if (firstObs.variance != null) {
+        // Clamp variance to realistic range (0 - 10 dBm^2)
+        var clampedVariance = Math.min(10, Math.max(0, firstObs.variance));
+        this.state.rssi.variance = Math.round(clampedVariance * 100) / 100;
+        if (typeof dash.setVariance === 'function') {
+          dash.setVariance(this.state.rssi.variance);
+        }
+      }
+      if (firstObs.baseline != null) {
+        this.state.rssi.baseline = firstObs.baseline;
       }
     }
   }
@@ -1553,27 +1577,40 @@ class LocationApp {
     if (!this.config) return null;
     var ap = (this.config.accessPoints || [])[0];
     if (!ap) return null;
-
     var nodes = this.config.nodes || [];
 
-    if (zoneId.includes('cross') || zoneId.includes('\uAD50\uCC28')) {
-      // Cross zone = center of all nodes + AP
-      var cx = ap.x;
-      var cy = ap.y;
-      var count = 1;
+    // Cross zone — center of all
+    if (zoneId.includes('cross') || zoneId.indexOf('\uAD50\uCC28') !== -1) {
+      var cx = ap.x, cy = ap.y, count = 1;
       nodes.forEach(function(n) { cx += n.x; cy += n.y; count++; });
       return { x: cx / count, y: cy / count };
     }
 
-    // Find which node this zone refers to
+    // Match zone to specific node by checking if zone ID contains the node index or ID
     for (var i = 0; i < nodes.length; i++) {
-      if (zoneId.includes('pc-' + (i + 1)) || zoneId.includes('PC' + (i + 1)) || zoneId.includes('node-' + (i + 1))) {
+      var node = nodes[i];
+      // Check various patterns: "pc-1", "pc-node-1", the node.id itself, observer sim IDs
+      if (zoneId.indexOf(node.id) !== -1 ||
+          zoneId.indexOf('pc-' + (i + 1)) !== -1 ||
+          zoneId.indexOf('PC' + (i + 1)) !== -1 ||
+          zoneId.indexOf('node-' + (i + 1)) !== -1 ||
+          zoneId.indexOf('observer-' + (i + 1)) !== -1 ||
+          zoneId.indexOf('sim-pc-' + (i + 1)) !== -1) {
         // Midpoint between AP and this node
-        return { x: (ap.x + nodes[i].x) / 2, y: (ap.y + nodes[i].y) / 2 };
+        return { x: (ap.x + node.x) / 2, y: (ap.y + node.y) / 2 };
       }
     }
 
-    // Fallback: midpoint of first node and AP
+    // Last resort: try to extract a number from the zone ID and match to node index
+    var numMatch = zoneId.match(/(\d+)/);
+    if (numMatch) {
+      var idx = parseInt(numMatch[1]) - 1;
+      if (idx >= 0 && idx < nodes.length) {
+        return { x: (ap.x + nodes[idx].x) / 2, y: (ap.y + nodes[idx].y) / 2 };
+      }
+    }
+
+    // Fallback
     if (nodes.length > 0) {
       return { x: (ap.x + nodes[0].x) / 2, y: (ap.y + nodes[0].y) / 2 };
     }

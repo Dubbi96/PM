@@ -5,7 +5,7 @@
  * Simulates:
  *  - Multiple PC observer nodes measuring RSSI from a single AP
  *  - Baseline calibration (auto, first 10 seconds)
- *  - Person disturbance via Fresnel zone line-of-sight model
+ *  - Person disturbance via dynamic Fresnel zone (proportional to AP-node distance)
  *  - Multi-person random walk movement
  *  - Per-observer delta/variance/disturbed detection
  *  - Zone inference from observer pair co-fluctuation
@@ -92,7 +92,8 @@
     this.referenceRssi = sm.referenceRssi || -30;        // RSSI at 1 m from AP
     this.pathLossExponent = sm.pathLossExponent || 2.8;   // indoor path-loss exponent
     this.noiseStdDev = 0.3;                               // Gaussian noise std dev (dBm)
-    this.fresnelRadius = 1.5;                             // meters: Fresnel zone radius for body disturbance
+    this.fresnelRadiusBase = 2.5;                         // meters: base Fresnel zone radius for body disturbance
+    this.fresnelRadiusPerMeter = 0.15;                    // additional radius per meter of AP-node distance
     this.maxBodyDrop = 6;                                 // max RSSI drop from body blockage (dBm)
     this.minBodyDrop = 2;                                 // min RSSI drop from body blockage (dBm)
 
@@ -109,11 +110,12 @@
     // ── Per-observer state ───────────────────────────────────────────
     // baselines[id] = computed baseline RSSI (set after calibration)
     this.baselines = {};
-    // rssiBuffers[id] = ring buffer of recent RSSI values (max 120 = 60 seconds at 2 Hz)
+    // rssiBuffers[id] = ring buffer of recent RSSI values (windowed)
     this.rssiBuffers = {};
     // rssiTrends[id] = last 60 values for diagnostics
     this.maxTrendLen = 60;
-    this.maxBufferLen = 120;
+    this.varianceWindowSize = 15;                         // samples for variance computation
+    this.maxBufferLen = 60;                               // keep enough for trend display, evict old
 
     for (var i = 0; i < this.observers.length; i++) {
       var obs = this.observers[i];
@@ -221,13 +223,16 @@
       var buf = this.rssiBuffers[obs.id] || [];
       var baseline = this.baselines[obs.id] || -42;
 
-      // Compute delta from last 5 RSSI samples (10 = 5 seconds at 2Hz, but spec says 5 samples)
+      // Compute delta from last 5 RSSI samples
       var recentSlice = buf.slice(Math.max(0, buf.length - 5));
       var delta = recentSlice.length > 0 ? mean(recentSlice) - baseline : 0;
 
-      // Compute variance from last 15 RSSI samples
-      var varianceSlice = buf.slice(Math.max(0, buf.length - 15));
+      // Compute variance from a strict window of recent samples only (last 15)
+      var windowSize = this.varianceWindowSize;
+      var varianceSlice = buf.slice(Math.max(0, buf.length - windowSize));
       var rssiVariance = variance(varianceSlice);
+      // Clamp to realistic range: RSSI variance should be 0-10 dBm^2 max
+      if (rssiVariance > 10) rssiVariance = 10;
 
       // Current RSSI = latest sample
       var currentRssi = buf.length > 0 ? buf[buf.length - 1] : baseline;
@@ -378,8 +383,9 @@
    * Apply disturbance to RSSI when a person is near the line-of-sight
    * between the observer and the AP.
    *
-   * Uses Fresnel zone approximation: if person is within fresnelRadius (1.5m)
-   * of the AP-observer line, RSSI drops proportionally.
+   * Uses Fresnel zone approximation with dynamic radius proportional to the
+   * AP-observer distance.  Wide-spaced nodes (4+ meters) get a larger detection
+   * zone so that a person walking between them is reliably detected.
    *
    * @param {number} baseRssi   Current RSSI before this person's effect
    * @param {Object} observer   Observer { x, y, ... }
@@ -394,14 +400,18 @@
       observer.x, observer.y
     );
 
+    // Dynamic Fresnel radius: base + proportional to AP-node distance
+    var apNodeDist = dist2d(this.ap.x, this.ap.y, observer.x, observer.y);
+    var fresnelRadius = this.fresnelRadiusBase + this.fresnelRadiusPerMeter * apNodeDist;
+
     // Only apply disturbance if within Fresnel zone
-    if (losDistance >= this.fresnelRadius) {
+    if (losDistance >= fresnelRadius) {
       return baseRssi;
     }
 
     // Disturbance proportional to proximity to line-of-sight
     // Closer to line = more blockage
-    var disturbanceFactor = (this.fresnelRadius - losDistance) / this.fresnelRadius;
+    var disturbanceFactor = (fresnelRadius - losDistance) / fresnelRadius;
 
     // Scale between minBodyDrop and maxBodyDrop
     var drop = this.minBodyDrop + disturbanceFactor * (this.maxBodyDrop - this.minBodyDrop);
@@ -572,19 +582,24 @@
       }
       presence = hasMoving ? 'active' : 'present_still';
 
-      // Confidence based on mean absolute delta
+      // Confidence based on mean absolute delta of DISTURBED observers only
       var totalAbsDelta = 0;
+      var disturbedCount = 0;
       for (var i = 0; i < this.observers.length; i++) {
         var obs = this.observers[i];
+        if (!disturbedSet[obs.id]) continue;
         var buf = this.rssiBuffers[obs.id] || [];
         var baseline = this.baselines[obs.id] || -42;
         var recent = buf.slice(Math.max(0, buf.length - 5));
         if (recent.length > 0) {
           totalAbsDelta += Math.abs(mean(recent) - baseline);
+          disturbedCount++;
         }
       }
-      overallConfidence = Math.min(1.0, totalAbsDelta / (disturbedList.length * 5.0));
-      overallConfidence = Math.max(0.1, overallConfidence);
+      // Use mean delta across disturbed observers; scale by 5 dBm = full confidence
+      var meanAbsDelta = disturbedCount > 0 ? totalAbsDelta / disturbedCount : 0;
+      overallConfidence = Math.min(1.0, meanAbsDelta / 5.0);
+      overallConfidence = Math.max(0.15, overallConfidence);
     }
 
     // Evaluate each zone
