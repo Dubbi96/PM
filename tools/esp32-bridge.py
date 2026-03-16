@@ -97,9 +97,11 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    # UDP socket
+    # UDP socket (SO_REUSEADDR + SO_REUSEPORT to prevent "Address already in use")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind(("0.0.0.0", args.udp_port))
     sock.settimeout(2.0)
 
