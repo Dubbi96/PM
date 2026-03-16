@@ -1393,33 +1393,25 @@ class LocationApp {
       }
     }
 
-    // ---- Continuous Position Estimation from RSSI delta ----
+    // ---- Position estimation using VARIANCE as primary weight ----
+    // Higher variance = person is closer to that observer = stronger pull toward that node
     if (data.fusion && data.fusion.observers_rssi) {
       var self = this;
       var ap = (this.config.accessPoints || [])[0] || { x: 0, y: 0 };
       var configNodes = this.config.nodes || [];
       var presence = data.fusion.presence || 'absent';
 
-      // Priority: ML position > Server position > Client calculation
-      var mlPos = data.fusion ? data.fusion.ml_estimated_position : null;
-      var serverPos = data.fusion ? data.fusion.estimated_position : null;
-
       if (presence !== 'absent' && presence !== 'waiting') {
-        // Calculate weighted position from ALL observers (not just disturbed)
         var totalWeight = 0;
         var weightedX = 0;
         var weightedY = 0;
-        var maxDelta = 0;
-
-        var refRssi = (self.config.signalMap || {}).referenceRssi || -30;
-        var pathLossN = (self.config.signalMap || {}).pathLossExponent || 3.0;
 
         Object.keys(data.fusion.observers_rssi).forEach(function(obsId) {
           var obs = data.fusion.observers_rssi[obsId];
+          var variance = Math.abs(obs.variance || 0);
           var absDelta = Math.abs(obs.delta || 0);
-          var variance = obs.variance || 0;
 
-          // Find node position for this observer
+          // Find node position
           var nodePos = null;
           for (var i = 0; i < configNodes.length; i++) {
             if (configNodes[i].id === obsId || configNodes[i].name === obsId) {
@@ -1427,7 +1419,6 @@ class LocationApp {
               break;
             }
           }
-          // Auto-match by index
           if (!nodePos) {
             var keys = Object.keys(data.fusion.observers_rssi);
             var idx = keys.indexOf(obsId);
@@ -1437,76 +1428,46 @@ class LocationApp {
           }
           if (!nodePos) return;
 
-          // Use RSSI to estimate distance from AP (log-distance path-loss model)
-          var currentRssi = obs.rssi || -50;
-          var distFromAP = Math.pow(10, (refRssi - currentRssi) / (10 * pathLossN));
-          distFromAP = Math.max(0.5, Math.min(10, distFromAP));  // clamp 0.5-10m
+          // WEIGHT = variance (not delta!)
+          // variance 112 at PC vs 0.33 at ESP32 → PC gets 340x more weight
+          var weight = Math.max(0.001, variance);
 
-          // Distance between AP and this node
-          var nodeDistFromAP = Math.sqrt(
-            Math.pow(nodePos.x - ap.x, 2) + Math.pow(nodePos.y - ap.y, 2)
-          );
+          // Position: person is NEAR the node with highest variance
+          // Not at the midpoint — at the NODE ITSELF (person is standing next to it)
+          // Use a blend: high variance → position closer to node, low variance → closer to AP
+          var pull = Math.min(1.0, Math.log10(1 + variance * 10) / 2);  // 0-1, logarithmic
+          // pull=0 → at AP, pull=1 → at node
+          var px = ap.x + (nodePos.x - ap.x) * pull;
+          var py = ap.y + (nodePos.y - ap.y) * pull;
 
-          // t = distFromAP / nodeDistFromAP
-          // t=0 → at AP, t=0.5 → midpoint, t=1 → at node, t>1 → beyond node
-          var t = nodeDistFromAP > 0 ? Math.min(1.5, distFromAP / nodeDistFromAP) : 0.5;
-
-          // Position along the AP-node vector
-          var pointX = ap.x + (nodePos.x - ap.x) * t;
-          var pointY = ap.y + (nodePos.y - ap.y) * t;
-
-          // Perpendicular vector to the AP-node line
-          var perpX = -(nodePos.y - ap.y);
-          var perpY = (nodePos.x - ap.x);
-          var perpLen = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
-          perpX /= perpLen;
-          perpY /= perpLen;
-
-          // Variance causes perpendicular displacement (person not exactly on the line)
-          var perpOffset = Math.sin(Date.now() / 2000) * variance * 0.1;
-          pointX += perpX * perpOffset;
-          pointY += perpY * perpOffset;
-
-          // Weight by delta strength — higher delta means this observer line is more relevant
-          var weight = Math.max(0.01, absDelta);
-
-          weightedX += pointX * weight;
-          weightedY += pointY * weight;
+          weightedX += px * weight;
+          weightedY += py * weight;
           totalWeight += weight;
-          if (absDelta > maxDelta) maxDelta = absDelta;
         });
 
         if (totalWeight > 0) {
           var measuredX = weightedX / totalWeight;
           var measuredY = weightedY / totalWeight;
 
-          // Priority: ML position > Server position > Client calculation
+          // Use server ML position if available (higher priority)
+          var mlPos = data.fusion ? data.fusion.ml_estimated_position : null;
+          var serverPos = data.fusion ? data.fusion.estimated_position : null;
+
           if (mlPos && mlPos.confidence > 0.3 && !isNaN(mlPos.x) && !isNaN(mlPos.y)) {
-            // ML engine has high confidence — use it primarily
-            measuredX = mlPos.x * 0.8 + measuredX * 0.2;
-            measuredY = mlPos.y * 0.8 + measuredY * 0.2;
-          } else if (serverPos && !isNaN(serverPos.x) && !isNaN(serverPos.y)) {
-            // Server position available — blend 70/30
-            measuredX = serverPos.x * 0.7 + measuredX * 0.3;
-            measuredY = serverPos.y * 0.7 + measuredY * 0.3;
-          }
-          // else: use client-side calculation as-is
-
-          // If ML position is available, show method info
-          if (mlPos && typeof dash.setDiagValue === 'function') {
-            dash.setDiagValue('ml_method', mlPos.method + ' (' + Math.round((mlPos.confidence || 0) * 100) + '%)');
+            measuredX = mlPos.x * 0.5 + measuredX * 0.5;
+            measuredY = mlPos.y * 0.5 + measuredY * 0.5;
           }
 
-          // Add small variance-based jitter for liveliness (person is moving!)
-          var variance = 0;
+          // Slight jitter for liveliness
+          var maxVar = 0;
           Object.values(data.fusion.observers_rssi).forEach(function(o) {
-            variance = Math.max(variance, o.variance || 0);
+            maxVar = Math.max(maxVar, o.variance || 0);
           });
-          var jitterScale = Math.min(0.3, variance * 0.1);
-          measuredX += (Math.random() - 0.5) * jitterScale;
-          measuredY += (Math.random() - 0.5) * jitterScale;
+          var jitter = Math.min(0.2, maxVar * 0.002);
+          measuredX += (Math.random() - 0.5) * jitter;
+          measuredY += (Math.random() - 0.5) * jitter;
 
-          // Smooth position (EMA)
+          // EMA smoothing
           if (!self._positionInitialized) {
             self._estimatedPosition.x = measuredX;
             self._estimatedPosition.y = measuredY;
@@ -1535,14 +1496,14 @@ class LocationApp {
           }
         }
       } else {
-        // No presence — clear person dot (fade out via empty array)
-        if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
-          this.renderer.updateTrackedDevices([]);
+        // No presence — clear dots
+        if (self.renderer && typeof self.renderer.updateTrackedDevices === 'function') {
+          self.renderer.updateTrackedDevices([]);
         }
         if (typeof dash.setTrackedDevices === 'function') {
           dash.setTrackedDevices([]);
         }
-        this._positionInitialized = false;
+        self._positionInitialized = false;
       }
     }
 
@@ -1611,9 +1572,10 @@ class LocationApp {
         dash.setRssiValue(this.state.rssi.current);
       }
       if (firstObs.variance != null) {
-        // Clamp variance to realistic range (0 - 10 dBm^2)
-        var clampedVariance = Math.min(10, Math.max(0, firstObs.variance));
-        this.state.rssi.variance = Math.round(clampedVariance * 100) / 100;
+        // Pass through raw variance — high values (e.g. 112) are meaningful:
+        // they indicate the person is RIGHT NEXT to that observer.
+        var rawVariance = Math.max(0, firstObs.variance);
+        this.state.rssi.variance = Math.round(rawVariance * 100) / 100;
         if (typeof dash.setVariance === 'function') {
           dash.setVariance(this.state.rssi.variance);
         }

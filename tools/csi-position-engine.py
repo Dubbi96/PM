@@ -175,20 +175,18 @@ class CSIPositionEngine:
         for obs_id, f in features.items():
             node_pos = self.nodes.get(obs_id, (3, 0))
             rssi = f["rssi"]
-            delta = abs(f["delta"])
+            variance = f["variance"]
 
             # Distance from AP
             dist = 10 ** ((ref_rssi - rssi) / (10 * n))
             dist = max(0.5, min(10, dist))
 
-            # Position along AP-node line
-            node_dist = math.sqrt((node_pos[0] - ap_x)**2 + (node_pos[1] - ap_y)**2) or 1
-            t = min(1.5, dist / node_dist)
+            # Pull toward node based on variance
+            pull = min(1.0, math.log10(1 + variance * 10) / 2)
+            px = ap_x + (node_pos[0] - ap_x) * pull
+            py = ap_y + (node_pos[1] - ap_y) * pull
 
-            px = ap_x + (node_pos[0] - ap_x) * t
-            py = ap_y + (node_pos[1] - ap_y) * t
-
-            w = max(0.1, delta)
+            w = max(0.001, variance)
             wx += px * w
             wy += py * w
             total_w += w
@@ -207,6 +205,7 @@ class CSIPositionEngine:
                 continue
 
             node_pos = self.nodes.get(obs_id, (3, 0))
+            variance = f["variance"]
 
             # Get group variances
             low_var = csi.get("low", {}).get("variance", 0)
@@ -251,7 +250,8 @@ class CSIPositionEngine:
             px += perp_x * perp_offset
             py += perp_y * perp_offset
 
-            confidence = min(1.0, total_var * 2)
+            # Variance-based confidence: higher observer variance → more reliable signal
+            confidence = min(1.0, total_var * 2) * min(1.0, math.log10(1 + variance * 10) / 2)
             return px, py, confidence * 0.3
 
         return 0, 0, 0
@@ -263,6 +263,8 @@ class CSIPositionEngine:
             profile = csi.get("profile")
             if not profile:
                 continue
+
+            variance = f["variance"]
 
             self.profile_history.append(profile)
             if len(self.profile_history) > self.MAX_HISTORY:
@@ -292,7 +294,8 @@ class CSIPositionEngine:
                 px = ap_x + (node_pos[0] - ap_x) * t
                 py = ap_y + (node_pos[1] - ap_y) * t
 
-                confidence = min(1.0, total_change / 5.0)
+                # Variance-based confidence: scale by observer variance
+                confidence = min(1.0, total_change / 5.0) * min(1.0, math.log10(1 + variance * 10) / 2)
                 return px, py, confidence * 0.3
 
         return 0, 0, 0

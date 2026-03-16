@@ -249,8 +249,6 @@ class FusionEngine:
             total_weight = 0.0
             wx, wy = 0.0, 0.0
             ap_x, ap_y = 0, 0
-            ref_rssi = -30  # reference RSSI at 1m
-            path_loss_n = 3.0  # indoor path loss exponent
 
             sorted_active_ids = sorted(active.keys())
             for obs_id in disturbed:
@@ -260,25 +258,18 @@ class FusionEngine:
                 idx = sorted_active_ids.index(obs_id) if obs_id in sorted_active_ids else 0
                 node_x, node_y = _OBSERVER_POSITIONS[min(idx, len(_OBSERVER_POSITIONS) - 1)]
 
-                # Estimate distance from AP using RSSI
-                current_rssi = obs.primary_rssi() or -50
-                dist_from_ap = 10 ** ((ref_rssi - current_rssi) / (10 * path_loss_n))
-                dist_from_ap = max(0.5, min(10.0, dist_from_ap))
+                # Use VARIANCE as weight (not delta!)
+                variance = obs.aggregate_variance()
+                weight = max(0.001, variance)
 
-                # Distance from AP to node
-                node_dist = ((node_x - ap_x)**2 + (node_y - ap_y)**2) ** 0.5
-                if node_dist < 0.1:
-                    node_dist = 1.0
+                # Pull toward the node: higher variance = person closer to that node
+                import math
+                pull = min(1.0, math.log10(1 + variance * 10) / 2)
+                # pull=0 → at AP, pull=1 → at the node position
 
-                # t = position along AP-node line (0=AP, 1=node)
-                t = min(1.5, dist_from_ap / node_dist)
+                px = ap_x + (node_x - ap_x) * pull
+                py = ap_y + (node_y - ap_y) * pull
 
-                # Point on the AP-node vector
-                px = ap_x + (node_x - ap_x) * t
-                py = ap_y + (node_y - ap_y) * t
-
-                # Weight by delta (higher disturbance = more confidence)
-                weight = max(0.01, abs(obs.primary_delta()))
                 wx += px * weight
                 wy += py * weight
                 total_weight += weight

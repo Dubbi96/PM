@@ -231,8 +231,8 @@
       var windowSize = this.varianceWindowSize;
       var varianceSlice = buf.slice(Math.max(0, buf.length - windowSize));
       var rssiVariance = variance(varianceSlice);
-      // Clamp to realistic range: RSSI variance should be 0-10 dBm^2 max
-      if (rssiVariance > 10) rssiVariance = 10;
+      // No clamp — raw variance is passed through.
+      // High values (e.g. 112) mean person is very close to the observer.
 
       // Current RSSI = latest sample
       var currentRssi = buf.length > 0 ? buf[buf.length - 1] : baseline;
