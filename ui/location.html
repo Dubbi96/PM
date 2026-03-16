@@ -14,14 +14,16 @@
   <link rel="preconnect" href="https://esm.sh">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Import Map: single React instance for both our code and MUI -->
+  <!-- Import Map: single React instance + MUI with all deps pinned -->
   <script type="importmap">
   {
     "imports": {
       "react": "https://esm.sh/react@18.2.0",
       "react/": "https://esm.sh/react@18.2.0/",
       "react-dom": "https://esm.sh/react-dom@18.2.0",
-      "react-dom/": "https://esm.sh/react-dom@18.2.0/"
+      "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+      "@mui/material": "https://esm.sh/*@mui/material@5.15.20",
+      "@mui/material/": "https://esm.sh/*@mui/material@5.15.20/"
     }
   }
   </script>
@@ -207,14 +209,14 @@
   import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
   import { createRoot } from 'react-dom/client';
 
-  // MUI (external=react,react-dom -> uses importmap React, no duplicate)
+  // MUI (resolved via importmap with * prefix — all deps use importmap)
   const {
     ThemeProvider, createTheme, CssBaseline,
     Box, Typography, Paper, Chip, IconButton, LinearProgress,
     Avatar, Badge, Card, CardContent, Grid, Stack, Divider,
     List, ListItem, ListItemIcon, ListItemText,
     AppBar, Toolbar, Tooltip, Alert, Button
-  } = await import('https://esm.sh/@mui/material@5.15.20?external=react,react-dom&bundle');
+  } = await import('@mui/material');
 
   // Expose React globally for signal-mesh.js, app.js, etc.
   window.React = React;
