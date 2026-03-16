@@ -1408,6 +1408,120 @@ class LocationApp {
   }
 
   // ---------------------------------------------------------------------------
+  // Observer-to-node mapping — maps real observers to config node positions
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Map observer IDs to config node positions.
+   * Observers are matched by ID first; unmatched observers are auto-assigned
+   * to the first available unmatched config node.
+   *
+   * @param {Object} observerData - { obsId: { rssi, ... }, ... }
+   * @returns {Object} mapping of observerId -> configNodeId
+   */
+  _mapObserversToNodes(observerData) {
+    if (!this.config || !this.config.nodes) return {};
+    var configNodes = this.config.nodes;
+    var allNodes = (this.config.accessPoints || []).concat(configNodes);
+
+    // Map each observer to a config node by ID match or sequential assignment
+    var assignedIds = {};
+    var unassignedObservers = [];
+
+    Object.keys(observerData).forEach(function(obsId) {
+      var matchedNode = configNodes.find(function(n) { return n.id === obsId; });
+      if (matchedNode) {
+        matchedNode.status = 'connected';
+        assignedIds[obsId] = matchedNode.id;
+      } else {
+        unassignedObservers.push(obsId);
+      }
+    });
+
+    // Auto-assign unmatched observers to unmatched config nodes
+    var assignedNodeIds = Object.values(assignedIds);
+    var freeNodes = configNodes.filter(function(n) {
+      return assignedNodeIds.indexOf(n.id) === -1;
+    });
+    unassignedObservers.forEach(function(obsId, i) {
+      if (i < freeNodes.length) {
+        freeNodes[i].status = 'connected';
+        freeNodes[i].name = obsId;  // show actual observer ID
+        assignedIds[obsId] = freeNodes[i].id;
+      }
+    });
+
+    // Mark unmatched config nodes as disconnected
+    var allAssignedNodeIds = Object.values(assignedIds);
+    configNodes.forEach(function(n) {
+      if (allAssignedNodeIds.indexOf(n.id) === -1) {
+        n.status = 'disconnected';
+      }
+    });
+
+    // Update renderer with node status
+    if (this.renderer && typeof this.renderer.updateNodes === 'function') {
+      this.renderer.updateNodes(allNodes.map(function(n) {
+        return { id: n.id, status: n.status || 'disconnected' };
+      }));
+    }
+
+    // Also update state.nodes so dashboard reflects status
+    var self = this;
+    configNodes.forEach(function(n) {
+      var existing = self.state.nodes.find(function(sn) { return sn.id === n.id; });
+      if (existing) {
+        existing.connected = n.status === 'connected';
+        existing.name = n.name;
+      }
+    });
+
+    return assignedIds;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Zone center calculation — derive person position from fusion zone ID
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Calculate the center position for a given fusion zone ID.
+   * Zone IDs typically reference which PC observer(s) detected disturbance.
+   *
+   * @param {string} zoneId - zone identifier from fusion result
+   * @returns {{x:number, y:number}|null}
+   */
+  _getZoneCenter(zoneId) {
+    if (!this.config) return null;
+    var ap = (this.config.accessPoints || [])[0];
+    if (!ap) return null;
+
+    var nodes = this.config.nodes || [];
+
+    if (zoneId.includes('cross') || zoneId.includes('\uAD50\uCC28')) {
+      // Cross zone = center of all nodes + AP
+      var cx = ap.x;
+      var cy = ap.y;
+      var count = 1;
+      nodes.forEach(function(n) { cx += n.x; cy += n.y; count++; });
+      return { x: cx / count, y: cy / count };
+    }
+
+    // Find which node this zone refers to
+    for (var i = 0; i < nodes.length; i++) {
+      if (zoneId.includes('pc-' + (i + 1)) || zoneId.includes('PC' + (i + 1)) || zoneId.includes('node-' + (i + 1))) {
+        // Midpoint between AP and this node
+        return { x: (ap.x + nodes[i].x) / 2, y: (ap.y + nodes[i].y) / 2 };
+      }
+    }
+
+    // Fallback: midpoint of first node and AP
+    if (nodes.length > 0) {
+      return { x: (ap.x + nodes[0].x) / 2, y: (ap.y + nodes[0].y) / 2 };
+    }
+    return { x: ap.x + 1, y: ap.y + 1 };
+  }
+
+  // ---------------------------------------------------------------------------
   // PC-RSSI mode — server polling for observer fusion data
   // ---------------------------------------------------------------------------
 
@@ -1455,6 +1569,9 @@ class LocationApp {
             if (dash && typeof dash.setObservers === 'function') {
               dash.setObservers(normalizedObs);
             }
+
+            // Map real observers to config node positions on the canvas
+            self._mapObserversToNodes(normalizedObs);
           }
           self.state.observerCount = observerCount;
 

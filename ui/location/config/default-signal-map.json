@@ -17,7 +17,32 @@
       "channel": 6
     }
   ],
-  "nodes": [],
+  "nodes": [
+    {
+      "id": "pc-node-1",
+      "name": "PC Observer 1",
+      "x": -3.0,
+      "y": 0.0,
+      "type": "pc-monitor",
+      "status": "disconnected"
+    },
+    {
+      "id": "pc-node-2",
+      "name": "PC Observer 2",
+      "x": 3.0,
+      "y": -2.0,
+      "type": "pc-monitor",
+      "status": "disconnected"
+    },
+    {
+      "id": "pc-node-3",
+      "name": "PC Observer 3",
+      "x": 0.0,
+      "y": 4.0,
+      "type": "pc-monitor",
+      "status": "disconnected"
+    }
+  ],
   "detection": {
     "presenceVarianceThreshold": 0.5,
     "motionEnergyThreshold": 0.1,
@@ -28,7 +53,7 @@
     "cusumThreshold": 3.0
   },
   "trilateration": {
-    "enabled": false,
+    "enabled": true,
     "minNodes": 3,
     "pathLossExponent": 3.0,
     "referenceDistance": 1.0,
