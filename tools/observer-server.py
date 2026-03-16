@@ -299,6 +299,7 @@ class FusionEngine:
                 "variance": round(obs.aggregate_variance(), 2),
                 "disturbed": obs.is_disturbed(),
                 "trend": obs.rssi_trend(),
+                "csi_features": getattr(obs, 'csi_features', {}),
             }
 
         if len(active) == 0:
@@ -330,6 +331,7 @@ class ObserverServer(BaseHTTPRequestHandler):
 
     # -- shared state (class variables) ----------------------------------------
     observers: dict[str, ObserverState] = {}
+    ml_position = None  # Latest ML-estimated position
     calibrating: bool = False
     calibration_start: float = 0.0
     calibration_data: dict[str, dict[str, list]] = {}  # observer_id -> bssid -> [rssi]
@@ -404,6 +406,22 @@ class ObserverServer(BaseHTTPRequestHandler):
 
             obs = self.__class__.observers[observer_id]
             obs.ingest(data)
+
+            # Check for ML position data
+            ml_pos = data.get("ml_position")
+            if ml_pos:
+                self.__class__.ml_position = {
+                    "x": ml_pos.get("x", 0),
+                    "y": ml_pos.get("y", 0),
+                    "confidence": ml_pos.get("confidence", 0),
+                    "method": ml_pos.get("method", "unknown"),
+                    "timestamp_ms": int(time.time() * 1000),
+                }
+
+            # Store CSI features if present
+            if "esp32_csi" in data:
+                csi = data["esp32_csi"]
+                obs.csi_features = csi.get("csi_features", {})
 
             # Calibration collection
             if self.__class__.calibrating:
@@ -490,7 +508,9 @@ class ObserverServer(BaseHTTPRequestHandler):
                 if elapsed >= CALIBRATION_DURATION:
                     self._finish_calibration_locked()
 
-            return FusionEngine.compute(self.__class__.observers)
+            result = FusionEngine.compute(self.__class__.observers)
+            result["ml_estimated_position"] = self.__class__.ml_position
+            return result
 
     def _get_health(self) -> dict:
         with self.__class__._lock:

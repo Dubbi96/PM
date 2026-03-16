@@ -17,6 +17,7 @@ import collections
 import http.client
 import json
 import logging
+import math
 import socket
 import struct
 import sys
@@ -29,6 +30,9 @@ VITALS_MAGIC = 0xC5110002
 
 # Rolling RSSI buffer for variance calculation
 RSSI_BUFFER_MAX = 60
+
+# Rolling CSI amplitude history (last N frames)
+CSI_HISTORY_MAX = 30
 
 # Rapid-change detection: threshold in dBm over a sliding window
 RAPID_CHANGE_THRESHOLD_DBM = 3.0
@@ -44,15 +48,29 @@ def parse_csi_frame(data):
     magic = struct.unpack_from("<I", data, 0)[0]
     if magic != CSI_MAGIC:
         return None
+
+    n_sub = struct.unpack_from("<H", data, 6)[0]
+    rssi = struct.unpack_from("<b", data, 16)[0]
+    noise = struct.unpack_from("<b", data, 17)[0]
+
+    # Parse I/Q pairs -> amplitude per subcarrier
+    iq_data = data[20:]
+    amplitudes = []
+    for s in range(min(n_sub, len(iq_data) // 2)):
+        i_val = struct.unpack_from("<b", iq_data, s * 2)[0]
+        q_val = struct.unpack_from("<b", iq_data, s * 2 + 1)[0]
+        amp = (i_val ** 2 + q_val ** 2) ** 0.5
+        amplitudes.append(amp)
+
     return {
         "type": "csi",
         "node_id": data[4],
-        "n_antennas": data[5],
-        "n_subcarriers": struct.unpack_from("<H", data, 6)[0],
+        "n_subcarriers": n_sub,
         "frequency_mhz": struct.unpack_from("<I", data, 8)[0],
         "seq": struct.unpack_from("<I", data, 12)[0],
-        "rssi": struct.unpack_from("<b", data, 16)[0],
-        "noise": struct.unpack_from("<b", data, 17)[0],
+        "rssi": rssi,
+        "noise": noise,
+        "amplitudes": amplitudes,  # 64 subcarrier amplitudes
     }
 
 
@@ -133,6 +151,7 @@ def main():
     rssi_buffer = []
     # Timestamped RSSI samples for rapid-change detection: deque of (timestamp, rssi)
     rssi_ts_buffer = collections.deque()
+    csi_amplitude_history = []  # list of amplitude arrays (last N frames)
     seq = 0
     last_send = 0
     send_interval = 1.0  # Send to server every 1 second
@@ -164,6 +183,12 @@ def main():
                         rssi_buffer.append(rssi_val)
                         if len(rssi_buffer) > RSSI_BUFFER_MAX:
                             rssi_buffer.pop(0)
+
+                        # Store amplitude profile
+                        if frame["amplitudes"]:
+                            csi_amplitude_history.append(frame["amplitudes"])
+                            if len(csi_amplitude_history) > CSI_HISTORY_MAX:
+                                csi_amplitude_history.pop(0)
 
                         # Track timestamped samples for rapid-change detection
                         rssi_ts_buffer.append((sample_time, rssi_val))
@@ -210,6 +235,50 @@ def main():
                     older = rssi_buffer[-10:-5] if len(rssi_buffer) >= 10 else rssi_buffer[:5]
                     rssi_trend = sum(recent) / len(recent) - sum(older) / len(older)
 
+                # Compute features from CSI amplitude data
+                csi_features = {}
+                if len(csi_amplitude_history) >= 5:
+                    n_sub = len(csi_amplitude_history[0])
+
+                    # Split subcarriers into 4 groups (low/mid-low/mid-high/high frequency)
+                    group_size = n_sub // 4
+                    groups = {
+                        'low': slice(0, group_size),
+                        'mid_low': slice(group_size, group_size * 2),
+                        'mid_high': slice(group_size * 2, group_size * 3),
+                        'high': slice(group_size * 3, n_sub),
+                    }
+
+                    # Compute per-group: mean amplitude, variance, temporal change
+                    for gname, gslice in groups.items():
+                        recent_amps = [frame[gslice] for frame in csi_amplitude_history[-10:]]
+                        # Mean amplitude per group
+                        group_means = [sum(amps) / max(1, len(amps)) for amps in recent_amps]
+                        mean_amp = sum(group_means) / len(group_means)
+                        var_amp = sum((m - mean_amp) ** 2 for m in group_means) / len(group_means)
+
+                        # Temporal change (last vs first)
+                        if len(group_means) >= 2:
+                            change = group_means[-1] - group_means[0]
+                        else:
+                            change = 0
+
+                        csi_features[gname] = {
+                            'mean': round(mean_amp, 2),
+                            'variance': round(var_amp, 4),
+                            'change': round(change, 2),
+                        }
+
+                    # Overall amplitude profile (downsampled to 16 values for efficiency)
+                    latest = csi_amplitude_history[-1]
+                    step = max(1, len(latest) // 16)
+                    profile = [round(latest[i * step], 1) for i in range(min(16, len(latest)))]
+                    csi_features['profile'] = profile
+
+                    # Dominant subcarrier group (highest variance = most affected by person)
+                    dominant = max(groups.keys(), key=lambda g: csi_features[g]['variance'])
+                    csi_features['dominant_group'] = dominant
+
                 # Build observer scan payload
                 bssid = "ESP32-CSI-NODE"
                 ap_data = {
@@ -251,6 +320,7 @@ def main():
                         "rssi_trend": round(rssi_trend, 2),  # dBm/s direction
                         "rssi_min": min(rssi_buffer),
                         "rssi_max": max(rssi_buffer),
+                        "csi_features": csi_features,  # subcarrier group analysis
                     },
                 }
 
@@ -261,11 +331,12 @@ def main():
                     if last_vitals:
                         v_info = f" presence={presence_state} motion={last_vitals['motion_energy']:.3f}"
                     trend_arrow = "+" if rssi_trend > 0.5 else ("-" if rssi_trend < -0.5 else "=")
+                    dominant = csi_features.get('dominant_group', '?')
                     print(
                         f"  [{seq:>4}] RSSI={mean_rssi:>6.1f}dBm var={variance:>5.2f} "
                         f"trend={rssi_trend:>+5.1f}({trend_arrow}) "
                         f"[{min(rssi_buffer)}/{max(rssi_buffer)}] "
-                        f"CSI={csi_count:>3}/s{v_info} → HTTP {status}"
+                        f"CSI={csi_count:>3}/s dom={dominant}{v_info} → HTTP {status}"
                     )
 
                 seq += 1

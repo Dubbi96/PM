@@ -1400,7 +1400,8 @@ class LocationApp {
       var configNodes = this.config.nodes || [];
       var presence = data.fusion.presence || 'absent';
 
-      // Prefer server-side estimated position if available
+      // Priority: ML position > Server position > Client calculation
+      var mlPos = data.fusion ? data.fusion.ml_estimated_position : null;
       var serverPos = data.fusion ? data.fusion.estimated_position : null;
 
       if (presence !== 'absent' && presence !== 'waiting') {
@@ -1479,10 +1480,21 @@ class LocationApp {
           var measuredX = weightedX / totalWeight;
           var measuredY = weightedY / totalWeight;
 
-          // Blend with server's estimated_position when available (70% server, 30% local)
-          if (serverPos && !isNaN(serverPos.x) && !isNaN(serverPos.y)) {
+          // Priority: ML position > Server position > Client calculation
+          if (mlPos && mlPos.confidence > 0.3 && !isNaN(mlPos.x) && !isNaN(mlPos.y)) {
+            // ML engine has high confidence — use it primarily
+            measuredX = mlPos.x * 0.8 + measuredX * 0.2;
+            measuredY = mlPos.y * 0.8 + measuredY * 0.2;
+          } else if (serverPos && !isNaN(serverPos.x) && !isNaN(serverPos.y)) {
+            // Server position available — blend 70/30
             measuredX = serverPos.x * 0.7 + measuredX * 0.3;
             measuredY = serverPos.y * 0.7 + measuredY * 0.3;
+          }
+          // else: use client-side calculation as-is
+
+          // If ML position is available, show method info
+          if (mlPos && typeof dash.setDiagValue === 'function') {
+            dash.setDiagValue('ml_method', mlPos.method + ' (' + Math.round((mlPos.confidence || 0) * 100) + '%)');
           }
 
           // Add small variance-based jitter for liveliness (person is moving!)
