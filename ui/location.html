@@ -744,6 +744,9 @@
     const [serverOnline, setServerOnline] = useState(false);
     const [trackedDevices, setTrackedDevices] = useState([]);
     const [accuracyLevel, setAccuracyLevel] = useState('none');
+    const [observers, setObservers] = useState({});
+    const [fusionResult, setFusionResult] = useState(null);
+    const [observerCount, setObserverCount] = useState(0);
 
     // Refs for canvases
     const floorplanContainerRef = useRef(null);
@@ -920,6 +923,16 @@
         setAccuracy: function(level) {
           setAccuracyLevel(level);
         },
+
+        setObservers: function(obs) {
+          var obsObj = typeof obs === 'object' && !Array.isArray(obs) ? obs : {};
+          setObservers(obsObj);
+          setObserverCount(Object.keys(obsObj).length);
+        },
+
+        setFusionResult: function(result) {
+          setFusionResult(result || null);
+        },
       };
 
       return () => { delete window.RuViewDashboard; };
@@ -943,7 +956,7 @@
     const getModeLabel = (m) => {
       switch (m) {
         case 'simulation': return 'Simulation';
-        case 'rssi-only': return 'RSSI Only';
+        case 'pc-rssi': return 'PC RSSI';
         case 'rssi+csi': return 'RSSI + CSI';
         default: return m;
       }
@@ -952,7 +965,7 @@
     const getSourceLabel = (m) => {
       switch (m) {
         case 'simulation': return 'Simulation';
-        case 'rssi-only': return 'WiFi RSSI';
+        case 'pc-rssi': return 'PC Observer';
         case 'rssi+csi': return 'ESP32 CSI';
         default: return 'Simulation';
       }
@@ -1019,10 +1032,10 @@
 
               // Mode chips
               React.createElement(Stack, { direction: 'row', spacing: 0.5 },
-                ['simulation', 'rssi-only', 'rssi+csi'].map(m =>
+                ['simulation', 'pc-rssi', 'rssi+csi'].map(m =>
                   React.createElement(Chip, {
                     key: m,
-                    label: m === 'simulation' ? 'Simulation' : m === 'rssi-only' ? 'RSSI Only' : 'RSSI + CSI',
+                    label: m === 'simulation' ? 'Simulation' : m === 'pc-rssi' ? 'PC RSSI' : 'RSSI + CSI',
                     size: 'small',
                     onClick: () => handleModeChange(m),
                     variant: mode === m ? 'filled' : 'outlined',
@@ -1031,13 +1044,13 @@
                       height: 26,
                       color: mode === m ? '#0a0f1a' : '#94a3b8',
                       backgroundColor: mode === m ?
-                        (m === 'simulation' ? '#fbbf24' : m === 'rssi-only' ? '#3b82f6' : '#00ff88') :
+                        (m === 'simulation' ? '#fbbf24' : m === 'pc-rssi' ? '#3b82f6' : '#00ff88') :
                         'transparent',
                       borderColor: mode === m ? 'transparent' : 'rgba(255,255,255,0.1)',
                       fontWeight: mode === m ? 700 : 500,
                       '&:hover': {
                         backgroundColor: mode === m ?
-                          (m === 'simulation' ? '#f59e0b' : m === 'rssi-only' ? '#2563eb' : '#00e676') :
+                          (m === 'simulation' ? '#f59e0b' : m === 'pc-rssi' ? '#2563eb' : '#00e676') :
                           'rgba(255,255,255,0.06)',
                       }
                     }
@@ -1057,11 +1070,11 @@
                   fontSize: '0.6rem',
                   height: 22,
                   backgroundColor: mode === 'simulation' ? 'rgba(251,191,36,0.12)' :
-                    mode === 'rssi-only' ? 'rgba(59,130,246,0.12)' : 'rgba(0,255,136,0.12)',
+                    mode === 'pc-rssi' ? 'rgba(59,130,246,0.12)' : 'rgba(0,255,136,0.12)',
                   color: mode === 'simulation' ? '#fbbf24' :
-                    mode === 'rssi-only' ? '#3b82f6' : '#00ff88',
+                    mode === 'pc-rssi' ? '#3b82f6' : '#00ff88',
                   border: '1px solid ' + (mode === 'simulation' ? 'rgba(251,191,36,0.2)' :
-                    mode === 'rssi-only' ? 'rgba(59,130,246,0.2)' : 'rgba(0,255,136,0.2)'),
+                    mode === 'pc-rssi' ? 'rgba(59,130,246,0.2)' : 'rgba(0,255,136,0.2)'),
                 }
               }),
 
@@ -1252,6 +1265,59 @@
             )
           ),
 
+          // Observer status header
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, mt: 1, px: 0.5 }
+          }, 'PC OBSERVER \uC0C1\uD0DC'),
+
+          // Observer cards
+          React.createElement(Paper, { elevation: 0, sx: { backgroundColor: '#111827', borderRadius: '12px', overflow: 'hidden' } },
+            React.createElement(List, { dense: true, disablePadding: true },
+              Object.values(observers).map(function(obs) {
+                return React.createElement(ListItem, {
+                  key: obs.id,
+                  dense: true,
+                  disablePadding: true,
+                  sx: { py: 0.5, px: 1 }
+                },
+                  // Status dot
+                  React.createElement(ListItemIcon, { sx: { minWidth: 28 } },
+                    React.createElement(Box, {
+                      sx: {
+                        width: 8, height: 8, borderRadius: '50%',
+                        backgroundColor: obs.connected ? '#00ff88' : '#64748b',
+                        boxShadow: obs.connected ? '0 0 6px #00ff88' : 'none',
+                      }
+                    })
+                  ),
+                  React.createElement(ListItemText, {
+                    primary: React.createElement(Typography, {
+                      variant: 'caption',
+                      sx: { fontWeight: 600, fontSize: '0.7rem', color: '#e2e8f0' }
+                    }, obs.id),
+                    secondary: React.createElement(Stack, { direction: 'row', spacing: 1 },
+                      React.createElement(Typography, {
+                        variant: 'caption',
+                        sx: { color: obs.disturbed ? '#00ff88' : '#64748b', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace' }
+                      }, (obs.rssi || '--') + ' dBm'),
+                      React.createElement(Typography, {
+                        variant: 'caption',
+                        sx: { color: '#64748b', fontSize: '0.6rem' }
+                      }, '\u0394' + (obs.delta != null ? obs.delta.toFixed(1) : '--'))
+                    )
+                  }),
+                  // Disturbed indicator
+                  obs.disturbed ? React.createElement(Chip, {
+                    label: '\uAD50\uB780',
+                    size: 'small',
+                    sx: { fontSize: '0.5rem', height: 16, backgroundColor: 'rgba(0,255,136,0.12)', color: '#00ff88' }
+                  }) : null
+                );
+              })
+            )
+          ),
+
           // Spacer
           React.createElement(Box, { sx: { flex: 1 } }),
 
@@ -1379,6 +1445,44 @@
             motionPower: spectralData.motionPower,
             dominantFreq: spectralData.dominantFreq,
           }),
+
+          // Fusion result section (only show when fusion data exists)
+          fusionResult && fusionResult.zones ?
+            React.createElement(Box, null,
+              React.createElement(Typography, {
+                variant: 'caption',
+                sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, px: 0.5 }
+              }, 'ZONE \uAC10\uC9C0'),
+              Object.entries(fusionResult.zones).map(function(entry) {
+                var zoneId = entry[0], zone = entry[1];
+                return React.createElement(Card, {
+                  key: zoneId,
+                  sx: {
+                    mb: 0.5,
+                    backgroundColor: '#111827',
+                    borderLeft: '3px solid ' + (zone.occupied ? '#00ff88' : '#1e293b'),
+                    transition: 'all 0.3s',
+                  }
+                },
+                  React.createElement(CardContent, { sx: { py: 0.8, px: 1.2, '&:last-child': { pb: 0.8 } } },
+                    React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center' },
+                      React.createElement(Typography, {
+                        variant: 'caption', sx: { fontWeight: 600, fontSize: '0.7rem', color: '#e2e8f0' }
+                      }, zone.name),
+                      React.createElement(Chip, {
+                        label: zone.occupied ? '\uAC10\uC9C0\uB428' : '\uBE44\uC5B4\uC788\uC74C',
+                        size: 'small',
+                        sx: {
+                          fontSize: '0.5rem', height: 18,
+                          backgroundColor: zone.occupied ? 'rgba(0,255,136,0.12)' : 'rgba(255,255,255,0.04)',
+                          color: zone.occupied ? '#00ff88' : '#475569',
+                        }
+                      })
+                    )
+                  )
+                );
+              })
+            ) : null,
 
           // Detection parameters card
           React.createElement(DetectionParamsCard, { config: config }),
@@ -1515,7 +1619,7 @@
             backgroundColor: 'rgba(17,24,39,0.6)',
           }
         },
-          // RSSI Trend
+          // Observer RSSI
           React.createElement(Card, {
             elevation: 0,
             sx: { backgroundColor: '#111827' }
@@ -1525,12 +1629,18 @@
                 React.createElement(Typography, {
                   variant: 'caption',
                   sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem' }
-                }, 'RSSI Trend'),
-                React.createElement(Typography, {
-                  variant: 'caption',
-                  id: 'motion-trend-value',
-                  sx: { color: '#3b82f6', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600 }
-                }, diagSignal)
+                }, 'Observer RSSI'),
+                React.createElement(Stack, { direction: 'row', spacing: 1, alignItems: 'center' },
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    sx: { color: '#94a3b8', fontSize: '0.6rem' }
+                  }, observerCount + ' nodes'),
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    id: 'motion-trend-value',
+                    sx: { color: '#3b82f6', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600 }
+                  }, diagSignal)
+                )
               ),
               React.createElement(Box, {
                 ref: motionCanvasRef,
@@ -1649,6 +1759,7 @@
   <script src="location/ws.js"></script>
   <script src="location/floorplan.js"></script>
   <script src="location/simulator.js"></script>
+  <script src="location/observer-simulator.js"></script>
   <script src="location/signal-mesh.js"></script>
   <script src="location/trilateration.js"></script>
   <script src="location/app.js"></script>

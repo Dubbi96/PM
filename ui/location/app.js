@@ -1,6 +1,7 @@
 // Location App Orchestrator — RuView RSSI Mesh Detection
 // Ties together SignalMeshRenderer (or FloorPlanRenderer fallback),
-// LocationAPI, LocationWebSocket, RSSISimulator, and TrilaterationEngine.
+// LocationAPI, LocationWebSocket, RSSISimulator, TrilaterationEngine,
+// and ObserverSimulator (PC multi-RSSI).
 // Manages presence-based state, RSSI metrics, spectral analysis, and UI lifecycle.
 
 /**
@@ -9,6 +10,9 @@
  * Main entry point for the RSSI mesh detection dashboard.
  * Loads signal-map config, wires up the mesh canvas, REST API adapter,
  * WebSocket stream, RSSI simulator, trilateration engine, and keeps every UI panel in sync.
+ *
+ * Observer system: supports PC multi-RSSI zone detection via ObserverSimulator
+ * (simulation) or server polling (pc-rssi mode).
  */
 class LocationApp {
   constructor() {
@@ -18,11 +22,12 @@ class LocationApp {
     this.renderer = null;      // SignalMeshRenderer (new) or FloorPlanRenderer (fallback)
     this.simulator = null;     // RSSISimulator (simulation mode only)
     this.trilateration = null; // TrilaterationEngine (multi-node positioning)
+    this.observerSimulator = null;  // ObserverSimulator instance
 
     // Canonical application state — RSSI mesh detection model
     this.state = {
-      mode: 'simulation',       // simulation | rssi-only | rssi+csi
-      source: 'simulated',      // simulated | wifi-rssi | esp32-csi
+      mode: 'simulation',       // simulation | rssi-only | rssi+csi | pc-rssi
+      source: 'simulated',      // simulated | wifi-rssi | esp32-csi | pc-rssi
       connected: false,
       serverStatus: 'offline',  // online | degraded | offline
 
@@ -65,7 +70,12 @@ class LocationApp {
       // Trilateration / multi-node tracking
       trackedDevices: [],       // [{ id, name, position, confidence, color, errorRadius, ... }]
       accuracyLevel: 'none',    // none | presence | direction | approximate | precise
-      activeNodes: 0
+      activeNodes: 0,
+
+      // Observer system (PC multi-RSSI)
+      observers: {},            // { observerId: { rssi, baseline, delta, variance, disturbed, ... } }
+      fusionResult: null,       // { presence, confidence, disturbedObservers, zone, ... }
+      observerCount: 0
     };
 
     // Timers tracked for cleanup
@@ -74,9 +84,13 @@ class LocationApp {
     this._simTimer = null;
     this._renderRafId = null;
     this._healthTimer = null;
+    this._pcRssiInterval = null;
 
     // Event tracking
     this._lastPushedEventCount = 0;
+
+    // Observer event tracking
+    this._lastDisturbedCount = 0;
 
     // Constants
     this._MAX_EVENTS = 50;
@@ -168,6 +182,9 @@ class LocationApp {
         console.log('[LocationApp] Simulation mode — skipping server health, WS, and polling');
         this.state.serverStatus = 'offline';
         this._startSimulation();
+      } else if (this.state.mode === 'pc-rssi') {
+        console.log('[LocationApp] PC-RSSI mode — starting observer polling');
+        this._startPcRssiPolling();
       } else {
         // 5. Check server health
         await this._checkServerHealth();
@@ -272,6 +289,8 @@ class LocationApp {
       this.state.mode = 'rssi+csi';
     } else if (this.state.source === 'wifi-rssi') {
       this.state.mode = 'rssi-only';
+    } else if (this.state.source === 'pc-rssi') {
+      this.state.mode = 'pc-rssi';
     }
 
     // Trigger UI updates
@@ -612,6 +631,8 @@ class LocationApp {
           this.state.source = 'esp32-csi';
         } else if (health.source === 'wifi-rssi' || health.source === 'wifi') {
           this.state.source = 'wifi-rssi';
+        } else if (health.source === 'pc-rssi') {
+          this.state.source = 'pc-rssi';
         } else if (health.source) {
           this.state.source = health.source;
         }
@@ -882,6 +903,16 @@ class LocationApp {
       console.log('[LocationApp] RSSISimulator not loaded, using built-in simulation');
       this._startBuiltinSimulation();
     }
+
+    // Start observer simulator if available
+    if (window.ObserverSimulator) {
+      this.observerSimulator = new window.ObserverSimulator(this.config);
+      this.observerSimulator.onData(function(data) {
+        self._processObserverData(data);
+      });
+      this.observerSimulator.start();
+      console.log('[LocationApp] ObserverSimulator started');
+    }
   }
 
   /**
@@ -928,6 +959,12 @@ class LocationApp {
         this.simulator.stop();
       }
       this.simulator = null;
+    }
+    if (this.observerSimulator) {
+      if (typeof this.observerSimulator.stop === 'function') {
+        this.observerSimulator.stop();
+      }
+      this.observerSimulator = null;
     }
     if (this._simTimer) {
       clearTimeout(this._simTimer);
@@ -1115,6 +1152,188 @@ class LocationApp {
   }
 
   // ---------------------------------------------------------------------------
+  // Observer system — PC multi-RSSI data processing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Process incoming observer data from ObserverSimulator or server polling.
+   * Updates observer state, fusion result, presence display, tracked devices,
+   * and pushes events for zone changes.
+   *
+   * @param {Object} data - { observers, fusion, persons }
+   */
+  _processObserverData(data) {
+    if (!data) return;
+
+    var dash = window.RuViewDashboard;
+    if (!dash) return;
+
+    // Update observers
+    if (data.observers) {
+      this.state.observers = data.observers;
+      this.state.observerCount = Object.keys(data.observers).length;
+      if (typeof dash.setObservers === 'function') {
+        dash.setObservers(data.observers);
+      }
+    }
+
+    // Update fusion result
+    if (data.fusion) {
+      this.state.fusionResult = data.fusion;
+      if (typeof dash.setFusionResult === 'function') {
+        dash.setFusionResult(data.fusion);
+      }
+
+      // Map fusion presence to main presence display
+      if (data.fusion.presence) {
+        if (typeof dash.setPresenceState === 'function') {
+          dash.setPresenceState(data.fusion.presence);
+        }
+      }
+      if (data.fusion.confidence != null) {
+        if (typeof dash.setConfidence === 'function') {
+          dash.setConfidence(Math.round(data.fusion.confidence * 100));
+        }
+      }
+
+      // Push events for zone changes
+      if (data.fusion.disturbedObservers && data.fusion.disturbedObservers.length > 0) {
+        // Only push event if state changed
+        var currentDisturbed = (this._lastDisturbedCount || 0);
+        var newDisturbed = data.fusion.disturbedObservers.length;
+        if (newDisturbed !== currentDisturbed) {
+          if (newDisturbed > currentDisturbed) {
+            if (typeof dash.pushEvent === 'function') {
+              dash.pushEvent({
+                type: 'enter',
+                message: newDisturbed + '\uAC1C observer \uAD50\uB780 \uAC10\uC9C0',
+                confidence: data.fusion.confidence
+              });
+            }
+          } else if (newDisturbed === 0) {
+            if (typeof dash.pushEvent === 'function') {
+              dash.pushEvent({
+                type: 'exit',
+                message: '\uAD50\uB780 \uD574\uC18C',
+                confidence: data.fusion.confidence
+              });
+            }
+          }
+        }
+        this._lastDisturbedCount = newDisturbed;
+      } else if (data.fusion.disturbedObservers && data.fusion.disturbedObservers.length === 0) {
+        // All clear — check if we need to push an exit event
+        if (this._lastDisturbedCount > 0) {
+          if (typeof dash.pushEvent === 'function') {
+            dash.pushEvent({
+              type: 'exit',
+              message: '\uAD50\uB780 \uD574\uC18C',
+              confidence: data.fusion.confidence
+            });
+          }
+        }
+        this._lastDisturbedCount = 0;
+      }
+    }
+
+    // Update tracked devices from observer simulation (person positions)
+    if (data.persons && data.persons.length > 0 && this.trilateration) {
+      var self = this;
+      // Feed person positions to trilateration for visualization
+      data.persons.forEach(function(person) {
+        // Calculate synthetic RSSI for each node based on person position
+        var rssiByNode = {};
+        var nodes = (self.config.accessPoints || []).concat(self.config.nodes || []);
+        nodes.forEach(function(node) {
+          var dx = person.x - node.x;
+          var dy = person.y - node.y;
+          var dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+          var n = (self.config.signalMap || {}).pathLossExponent || 3.0;
+          var ref = (self.config.signalMap || {}).referenceRssi || -30;
+          rssiByNode[node.id] = ref - 10 * n * Math.log10(dist);
+        });
+
+        self.trilateration.trackDevice(person.id, rssiByNode, {
+          name: person.id.replace('sim-person-', 'Person '),
+          color: person.color
+        });
+      });
+
+      var devices = this.trilateration.getTrackedDevices();
+      if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
+        var devArray = typeof devices === 'object' && !Array.isArray(devices) ? Object.values(devices) : (devices || []);
+        this.renderer.updateTrackedDevices(devArray);
+      }
+      if (typeof dash.setTrackedDevices === 'function') {
+        dash.setTrackedDevices(devices);
+      }
+    }
+
+    // Update observer RSSI in diagnostics (pick first observer's RSSI for trend)
+    var observerValues = Object.values(data.observers || {});
+    var firstObs = observerValues.length > 0 ? observerValues[0] : null;
+    if (firstObs && firstObs.rssi != null) {
+      if (typeof dash.setRssiValue === 'function') {
+        dash.setRssiValue(Math.round(firstObs.rssi * 100) / 100);
+      }
+      if (firstObs.variance != null && typeof dash.setVariance === 'function') {
+        dash.setVariance(Math.round(firstObs.variance * 100) / 100);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // PC-RSSI mode — server polling for observer fusion data
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Start polling the server for PC-RSSI observer fusion data.
+   * Polls /api/observers/fusion and /api/observers/status every 2 seconds.
+   */
+  _startPcRssiPolling() {
+    var self = this;
+    console.log('[LocationApp] Starting PC-RSSI polling');
+
+    this._pcRssiInterval = setInterval(function() {
+      // Fetch fusion data from server
+      fetch('/api/observers/fusion')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          self._processObserverData({
+            observers: data.observers_rssi || {},
+            fusion: data,
+            persons: []
+          });
+        })
+        .catch(function() { /* server not available */ });
+
+      // Also fetch observer status
+      fetch('/api/observers/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.observers) {
+            var dash = window.RuViewDashboard;
+            if (dash && typeof dash.setObservers === 'function') {
+              dash.setObservers(data.observers);
+            }
+          }
+        })
+        .catch(function() {});
+    }, 2000);
+  }
+
+  /**
+   * Stop PC-RSSI observer polling.
+   */
+  _stopPcRssiPolling() {
+    if (this._pcRssiInterval) {
+      clearInterval(this._pcRssiInterval);
+      this._pcRssiInterval = null;
+      console.log('[LocationApp] PC-RSSI polling stopped');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Mode switching
   // ---------------------------------------------------------------------------
 
@@ -1124,6 +1343,7 @@ class LocationApp {
     // Stop current data source
     this._stopSimulation();
     this._stopPolling();
+    this._stopPcRssiPolling();
 
     switch (newMode) {
       case 'simulation':
@@ -1142,6 +1362,13 @@ class LocationApp {
         this.state.source = 'esp32-csi';
         this.state.mode = 'rssi+csi';
         this._startPolling();
+        break;
+
+      case 'pc-rssi':
+        this.state.source = 'pc-rssi';
+        this.state.mode = 'pc-rssi';
+        this._stopSimulation();
+        this._startPcRssiPolling();
         break;
 
       default:
@@ -1240,7 +1467,8 @@ class LocationApp {
     var map = {
       'simulated': 'Simulation \uBAA8\uB4DC',
       'wifi-rssi': 'WiFi RSSI \uC2E4\uCE21',
-      'esp32-csi': 'ESP32 CSI \uC2E4\uCE21'
+      'esp32-csi': 'ESP32 CSI \uC2E4\uCE21',
+      'pc-rssi': 'PC Multi-RSSI \uC2E4\uCE21'
     };
     return map[source] || source;
   }
@@ -1253,6 +1481,8 @@ class LocationApp {
         return { icon: '\u25C9', label: 'RSSI', cls: 'badge--blue' };
       case 'rssi+csi':
         return { icon: '\u25C9\u25C9', label: 'RSSI+CSI', cls: 'badge--green' };
+      case 'pc-rssi':
+        return { icon: '\u25CE', label: 'PC-RSSI', cls: 'badge--cyan' };
       default:
         return { icon: '', label: '', cls: '' };
     }
@@ -1267,6 +1497,7 @@ class LocationApp {
 
     this._stopSimulation();
     this._stopPolling();
+    this._stopPcRssiPolling();
     this._stopRenderLoop();
 
     if (this._healthTimer) {
@@ -1290,6 +1521,13 @@ class LocationApp {
     if (this.renderer && typeof this.renderer.destroy === 'function') {
       this.renderer.destroy();
       this.renderer = null;
+    }
+
+    if (this.observerSimulator) {
+      if (typeof this.observerSimulator.stop === 'function') {
+        this.observerSimulator.stop();
+      }
+      this.observerSimulator = null;
     }
 
     this.simulator = null;
