@@ -1426,10 +1426,34 @@ class LocationApp {
         .then(function(data) {
           var observerCount = 0;
           if (data.observers) {
-            observerCount = Object.keys(data.observers).length;
+            // Normalize observer data — server returns per-BSSID maps, UI expects single values
+            var normalizedObs = {};
+            Object.keys(data.observers).forEach(function(obsId) {
+              var raw = data.observers[obsId];
+              var norm = Object.assign({}, raw);
+              // Convert per-BSSID maps to single values (use first/average)
+              if (raw.latest_rssi && typeof raw.latest_rssi === 'object' && !Array.isArray(raw.latest_rssi)) {
+                var vals = Object.values(raw.latest_rssi);
+                norm.rssi = vals.length > 0 ? vals.reduce(function(a,b){return a+b;},0)/vals.length : null;
+              }
+              if (raw.delta && typeof raw.delta === 'object' && !Array.isArray(raw.delta)) {
+                var dvals = Object.values(raw.delta);
+                norm.delta = dvals.length > 0 ? Math.round(dvals.reduce(function(a,b){return a+b;},0)/dvals.length * 10)/10 : 0;
+              } else if (typeof raw.delta !== 'number') {
+                norm.delta = 0;
+              }
+              if (raw.baseline_rssi && typeof raw.baseline_rssi === 'object') {
+                var bvals = Object.values(raw.baseline_rssi);
+                norm.baseline = bvals.length > 0 ? bvals.reduce(function(a,b){return a+b;},0)/bvals.length : null;
+              }
+              // Compute disturbed flag
+              norm.disturbed = norm.delta != null && Math.abs(norm.delta) > 2;
+              normalizedObs[obsId] = norm;
+            });
+            observerCount = Object.keys(normalizedObs).length;
             var dash = window.RuViewDashboard;
             if (dash && typeof dash.setObservers === 'function') {
-              dash.setObservers(data.observers);
+              dash.setObservers(normalizedObs);
             }
           }
           self.state.observerCount = observerCount;

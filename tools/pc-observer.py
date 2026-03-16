@@ -806,6 +806,25 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Scan command failed (exit %d): %s", exc.returncode, exc)
         return 1
 
+    # Connection test before starting the loop
+    if not args.dry_run:
+        logger.info("Testing server connection: %s ...", args.server)
+        try:
+            import socket
+            parsed_url = urllib.parse.urlparse(args.server)
+            test_host = parsed_url.hostname or "localhost"
+            test_port = parsed_url.port or 8080
+            sock = socket.create_connection((test_host, test_port), timeout=5)
+            sock.close()
+            logger.info("Server connection OK: %s:%d reachable.", test_host, test_port)
+        except Exception as e:
+            logger.warning(
+                "Cannot reach server %s:%d (%s).\n"
+                "  Check: 1) Is the server running?  2) Same WiFi network?  3) Firewall?\n"
+                "  Test from this PC: curl http://%s:%d/health/health",
+                test_host, test_port, e, test_host, test_port
+            )
+
     seq = 0
     logger.info("Starting scan loop (interval=%.1fs). Press Ctrl+C to stop.", args.interval)
 

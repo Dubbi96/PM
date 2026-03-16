@@ -1321,7 +1321,7 @@
                       React.createElement(Typography, {
                         variant: 'caption',
                         sx: { color: '#64748b', fontSize: '0.6rem' }
-                      }, '\u0394' + (obs.delta != null ? obs.delta.toFixed(1) : '--'))
+                      }, '\u0394' + (obs.delta != null && typeof obs.delta === 'number' ? obs.delta.toFixed(1) : (obs.delta != null ? String(obs.delta) : '--')))
                     )
                   }),
                   // Disturbed indicator
