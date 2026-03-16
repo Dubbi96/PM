@@ -122,6 +122,47 @@ class ObserverState:
         # Use the AP with the largest absolute delta
         return max(self.delta.values(), key=abs, default=0.0)
 
+    def rssi_trend(self) -> str:
+        """Determine if RSSI is rising, falling, or stable across tracked APs.
+
+        Compares the mean of the first half of recent samples to the second half
+        in the ring buffer for the primary (strongest) AP.  Returns one of:
+        ``"rising"``, ``"falling"``, or ``"stable"``.
+        """
+        if not self.rssi_buffer:
+            return "stable"
+
+        # Pick the AP with the largest absolute delta (same as primary_delta)
+        primary_bssid = None
+        best_abs = 0.0
+        for bssid, d in self.delta.items():
+            if abs(d) > best_abs:
+                best_abs = abs(d)
+                primary_bssid = bssid
+
+        if primary_bssid is None:
+            # Fallback: use the AP with the most samples
+            primary_bssid = max(self.rssi_buffer, key=lambda b: len(self.rssi_buffer[b]))
+
+        buf = self.rssi_buffer.get(primary_bssid)
+        if buf is None or len(buf) < 4:
+            return "stable"
+
+        recent = list(buf)[-VARIANCE_WINDOW:]
+        mid = len(recent) // 2
+        first_half = recent[:mid]
+        second_half = recent[mid:]
+
+        mean_first = statistics.mean(first_half)
+        mean_second = statistics.mean(second_half)
+        diff = mean_second - mean_first
+
+        if diff > 1.0:
+            return "rising"
+        elif diff < -1.0:
+            return "falling"
+        return "stable"
+
     def to_status_dict(self) -> dict:
         return {
             "id": self.id,
@@ -132,6 +173,7 @@ class ObserverState:
             "latest_rssi": dict(self.latest_rssi),
             "baseline_rssi": dict(self.baseline),
             "delta": {k: round(v, 2) for k, v in self.delta.items()},
+            "trend": self.rssi_trend(),
         }
 
 
@@ -197,7 +239,47 @@ class FusionEngine:
             zones["zone-c"]["occupied"] = True
             zones["zone-c"]["confidence"] = round(confidence, 2)
 
-        # Per-observer RSSI summary
+        # -- Estimated position (weighted centroid of disturbed observers) ----
+        # Default observer node positions (metres, arbitrary coordinate frame).
+        # AP is assumed at the origin (0, 0).
+        _OBSERVER_POSITIONS = [(-5, 0), (5, 0), (0, 6), (3, 0)]
+
+        estimated_position = None
+        if disturbed:
+            total_weight = 0.0
+            wx, wy = 0.0, 0.0
+            sorted_active_ids = sorted(active.keys())
+            for obs_id in disturbed:
+                obs = active.get(obs_id)
+                if not obs:
+                    continue
+                idx = (
+                    sorted_active_ids.index(obs_id)
+                    if obs_id in sorted_active_ids
+                    else 0
+                )
+                node_x, node_y = _OBSERVER_POSITIONS[
+                    min(idx, len(_OBSERVER_POSITIONS) - 1)
+                ]
+
+                # AP at origin -- midpoint between AP and observer node
+                ap_x, ap_y = 0, 0
+                mid_x = (ap_x + node_x) / 2
+                mid_y = (ap_y + node_y) / 2
+
+                # Weight by absolute delta magnitude
+                weight = max(0.01, abs(obs.primary_delta()))
+                wx += mid_x * weight
+                wy += mid_y * weight
+                total_weight += weight
+
+            if total_weight > 0:
+                estimated_position = {
+                    "x": round(wx / total_weight, 2),
+                    "y": round(wy / total_weight, 2),
+                }
+
+        # Per-observer RSSI summary (includes trend direction)
         observers_rssi = {}
         for oid, obs in active.items():
             rssi_val = obs.primary_rssi()
@@ -206,6 +288,7 @@ class FusionEngine:
                 "delta": round(obs.primary_delta(), 2),
                 "variance": round(obs.aggregate_variance(), 2),
                 "disturbed": obs.is_disturbed(),
+                "trend": obs.rssi_trend(),
             }
 
         if len(active) == 0:
@@ -220,6 +303,7 @@ class FusionEngine:
             "presence": presence,
             "confidence": round(confidence, 2),
             "disturbed_observers": disturbed,
+            "estimated_position": estimated_position,
             "zones": zones,
             "observers_rssi": observers_rssi,
             "active_observers": len(active),

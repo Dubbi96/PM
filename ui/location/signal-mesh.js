@@ -186,8 +186,15 @@ var SignalMeshRenderer = (function() {
     // Smoothly interpolated render positions per device id
     this._deviceRenderPositions = {};
 
-    // Smooth trail state: id -> [{x, y}] canvas-space trail points
+    // Smooth trail state: id -> [{x, y, t}] canvas-space trail points with timestamp
     this._deviceTrails = {};
+
+    // Fade alpha per device id (0..1). Used for smooth appear/disappear.
+    this._deviceFadeAlpha = {};
+
+    // Snapshot of last known device data for devices that just disappeared,
+    // so we can keep rendering them during fade-out.
+    this._deviceLastKnown = {};
 
     // Animation
     this._animationId = null;
@@ -313,23 +320,24 @@ var SignalMeshRenderer = (function() {
   SignalMeshRenderer.prototype.updateTrackedDevices = function(devices) {
     this._trackedDevices = devices || [];
 
-    // Clean up stale render positions for removed devices
+    // Build set of currently active device ids
     var activeIds = {};
     for (var i = 0; i < this._trackedDevices.length; i++) {
-      if (this._trackedDevices[i].id) activeIds[this._trackedDevices[i].id] = true;
-    }
-    for (var rid in this._deviceRenderPositions) {
-      if (this._deviceRenderPositions.hasOwnProperty(rid) && !activeIds[rid]) {
-        delete this._deviceRenderPositions[rid];
+      var dev = this._trackedDevices[i];
+      if (dev.id) {
+        activeIds[dev.id] = true;
+        // Mark active devices to fade IN (target alpha = 1)
+        if (this._deviceFadeAlpha[dev.id] === undefined) {
+          this._deviceFadeAlpha[dev.id] = 0; // start from 0 for new devices
+        }
+        // Snapshot last known data
+        this._deviceLastKnown[dev.id] = dev;
       }
     }
 
-    // Clean up stale trail data for removed devices
-    for (var tid in this._deviceTrails) {
-      if (this._deviceTrails.hasOwnProperty(tid) && !activeIds[tid]) {
-        delete this._deviceTrails[tid];
-      }
-    }
+    // For devices that just disappeared: DON'T delete their render state.
+    // Instead let the draw loop fade them out via _deviceFadeAlpha.
+    // Only clean up once alpha reaches ~0 (handled in _drawTrackedDevices).
   };
 
   /** Recalculate canvas dimensions and scale to fit container. */
@@ -1033,35 +1041,142 @@ var SignalMeshRenderer = (function() {
 
   /** @private */
   SignalMeshRenderer.prototype._drawTrackedDevices = function() {
-    if (!this._trackedDevices || this._trackedDevices.length === 0) return;
-
     var ctx = this._ctx;
-    var PERSON_COLOR = '#ef4444';  // RED — impossible to miss
+    var PERSON_COLOR_R = 239, PERSON_COLOR_G = 68, PERSON_COLOR_B = 68; // #ef4444
+    var PERSON_COLOR = '#ef4444';
+    var TRAIL_MAX_POINTS = 40;
+    var TRAIL_MAX_AGE_MS = 3000; // trail points older than 3s are pruned
+    var LERP_FACTOR = 0.07;      // 7% per frame — smooth natural movement
+    var FADE_IN_SPEED = 0.05;    // alpha increase per frame (~1s to full at 60fps)
+    var FADE_OUT_SPEED = 0.02;   // alpha decrease per frame (~0.8s to gone at 60fps)
+
+    // Build set of currently active device ids
+    var activeIds = {};
+    for (var i = 0; i < this._trackedDevices.length; i++) {
+      if (this._trackedDevices[i].id) activeIds[this._trackedDevices[i].id] = true;
+    }
+
+    // Collect all device ids that need rendering (active + fading out)
+    var renderIds = {};
+    for (var ai in activeIds) {
+      if (activeIds.hasOwnProperty(ai)) renderIds[ai] = true;
+    }
+    for (var fi in this._deviceFadeAlpha) {
+      if (this._deviceFadeAlpha.hasOwnProperty(fi) && this._deviceFadeAlpha[fi] > 0.01) {
+        renderIds[fi] = true;
+      }
+    }
+
+    // Nothing to render at all
+    var hasAny = false;
+    for (var chk in renderIds) { if (renderIds.hasOwnProperty(chk)) { hasAny = true; break; } }
+    if (!hasAny) return;
 
     ctx.save();
+    var now = performance.now();
 
-    for (var di = 0; di < this._trackedDevices.length; di++) {
-      var device = this._trackedDevices[di];
-      if (!device.position) continue;
+    for (var devId in renderIds) {
+      if (!renderIds.hasOwnProperty(devId)) continue;
+
+      var isActive = !!activeIds[devId];
+
+      // --- Fade alpha management ---
+      if (this._deviceFadeAlpha[devId] === undefined) {
+        this._deviceFadeAlpha[devId] = 0;
+      }
+      if (isActive) {
+        // Fade in
+        this._deviceFadeAlpha[devId] = Math.min(1.0, this._deviceFadeAlpha[devId] + FADE_IN_SPEED);
+      } else {
+        // Fade out
+        this._deviceFadeAlpha[devId] = Math.max(0, this._deviceFadeAlpha[devId] - FADE_OUT_SPEED);
+      }
+      var alpha = this._deviceFadeAlpha[devId];
+
+      // If fully faded out, clean up all state for this device
+      if (alpha < 0.01) {
+        delete this._deviceFadeAlpha[devId];
+        delete this._deviceRenderPositions[devId];
+        delete this._deviceTrails[devId];
+        delete this._deviceLastKnown[devId];
+        continue;
+      }
+
+      // --- Resolve device data (active or last-known for fading) ---
+      var device = null;
+      if (isActive) {
+        for (var si = 0; si < this._trackedDevices.length; si++) {
+          if (this._trackedDevices[si].id === devId) { device = this._trackedDevices[si]; break; }
+        }
+      }
+      if (!device) device = this._deviceLastKnown[devId];
+      if (!device || !device.position) continue;
 
       // --- Position interpolation (lerp) for smooth movement ---
       var targetPos = this._worldToCanvas(device.position.x, device.position.y);
       var targetX = targetPos[0];
       var targetY = targetPos[1];
-      var renderId = device.id || ('_dev_' + di);
 
-      if (!this._deviceRenderPositions[renderId]) {
-        this._deviceRenderPositions[renderId] = { x: targetX, y: targetY };
+      if (!this._deviceRenderPositions[devId]) {
+        this._deviceRenderPositions[devId] = { x: targetX, y: targetY };
       }
-      var rp = this._deviceRenderPositions[renderId];
-      var lerpFactor = 0.07;  // smoother: 7% per frame for natural movement
-      rp.x += (targetX - rp.x) * lerpFactor;
-      rp.y += (targetY - rp.y) * lerpFactor;
+      var rp = this._deviceRenderPositions[devId];
+      // Only lerp toward target if device is active; if fading, hold position
+      if (isActive) {
+        rp.x += (targetX - rp.x) * LERP_FACTOR;
+        rp.y += (targetY - rp.y) * LERP_FACTOR;
+      }
       var px = rp.x;
       var py = rp.y;
 
-      // PERSON DOT — RED, large, always visible
+      // --- Trail: record and draw ---
+      if (!this._deviceTrails[devId]) {
+        this._deviceTrails[devId] = [];
+      }
+      var trail = this._deviceTrails[devId];
+
+      // Add trail point from lerped position (only if active and moving)
+      if (isActive) {
+        var addPoint = true;
+        if (trail.length > 0) {
+          var last = trail[trail.length - 1];
+          var dx = px - last.x;
+          var dy = py - last.y;
+          // Only add if moved at least 1px (avoid clumping)
+          if (dx * dx + dy * dy < 1) addPoint = false;
+        }
+        if (addPoint) {
+          trail.push({ x: px, y: py, t: now });
+        }
+      }
+
+      // Prune old trail points
+      while (trail.length > TRAIL_MAX_POINTS) trail.shift();
+      while (trail.length > 0 && (now - trail[0].t) > TRAIL_MAX_AGE_MS) trail.shift();
+
+      // Draw trail BEFORE dot (so dot renders on top)
+      if (trail.length > 1) {
+        for (var ti = 1; ti < trail.length; ti++) {
+          var age0 = 1 - ((now - trail[ti - 1].t) / TRAIL_MAX_AGE_MS);
+          var age1 = 1 - ((now - trail[ti].t) / TRAIL_MAX_AGE_MS);
+          if (age0 < 0) age0 = 0;
+          if (age1 < 0) age1 = 0;
+          var segAlpha = Math.min(age0, age1) * 0.4 * alpha; // fade with device alpha too
+          if (segAlpha < 0.01) continue;
+
+          ctx.beginPath();
+          ctx.moveTo(trail[ti - 1].x, trail[ti - 1].y);
+          ctx.lineTo(trail[ti].x, trail[ti].y);
+          ctx.strokeStyle = 'rgba(' + PERSON_COLOR_R + ',' + PERSON_COLOR_G + ',' + PERSON_COLOR_B + ',' + segAlpha + ')';
+          ctx.lineWidth = 2.5 * segAlpha + 0.5;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+        }
+      }
+
+      // --- PERSON DOT — RED, large, with glow ---
       ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.shadowColor = PERSON_COLOR;
       ctx.shadowBlur = 15;
       ctx.beginPath();
@@ -1071,17 +1186,23 @@ var SignalMeshRenderer = (function() {
       ctx.restore();
 
       // White center
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.beginPath();
       ctx.arc(px, py, 3, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.fill();
+      ctx.restore();
 
-      // Name label below
+      // "Person" label below the dot (uses lerped position)
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.font = 'bold 12px "Inter", sans-serif';
       ctx.fillStyle = PERSON_COLOR;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillText(device.name || 'Person', px, py + 16);
+      ctx.restore();
     }
 
     ctx.restore();

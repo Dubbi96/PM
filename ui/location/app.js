@@ -92,6 +92,11 @@ class LocationApp {
     // Observer event tracking
     this._lastDisturbedCount = 0;
 
+    // Continuous person position estimation state
+    this._estimatedPosition = { x: 0, y: 0 };
+    this._positionInitialized = false;
+    this._positionSmoothing = 0.15;  // 15% new + 85% previous
+
     // Constants
     this._MAX_EVENTS = 50;
     this._MAX_TREND_POINTS = 60;
@@ -1388,58 +1393,112 @@ class LocationApp {
       }
     }
 
-    // Generate ONE person dot from all disturbed observers
-    // Multiple disturbed observers → person is at the intersection (centroid)
-    if (data.fusion && data.fusion.disturbedObservers && data.fusion.disturbedObservers.length > 0) {
+    // ---- Continuous Position Estimation from RSSI delta ----
+    if (data.fusion && data.fusion.observers_rssi) {
       var self = this;
       var ap = (this.config.accessPoints || [])[0] || { x: 0, y: 0 };
       var configNodes = this.config.nodes || [];
+      var presence = data.fusion.presence || 'absent';
 
-      // Collect positions of all disturbed observer nodes
-      var disturbedPositions = [];
-      data.fusion.disturbedObservers.forEach(function(obsId, idx) {
-        var nodePos = null;
-        for (var i = 0; i < configNodes.length; i++) {
-          if (configNodes[i].id === obsId || configNodes[i].name === obsId) {
-            nodePos = { x: configNodes[i].x, y: configNodes[i].y };
-            break;
+      if (presence !== 'absent' && presence !== 'waiting') {
+        // Calculate weighted position from ALL observers (not just disturbed)
+        var totalWeight = 0;
+        var weightedX = 0;
+        var weightedY = 0;
+        var maxDelta = 0;
+
+        Object.keys(data.fusion.observers_rssi).forEach(function(obsId) {
+          var obs = data.fusion.observers_rssi[obsId];
+          var absDelta = Math.abs(obs.delta || 0);
+
+          // Find node position for this observer
+          var nodePos = null;
+          for (var i = 0; i < configNodes.length; i++) {
+            if (configNodes[i].id === obsId || configNodes[i].name === obsId) {
+              nodePos = { x: configNodes[i].x, y: configNodes[i].y };
+              break;
+            }
+          }
+          // Auto-match by index
+          if (!nodePos) {
+            var keys = Object.keys(data.fusion.observers_rssi);
+            var idx = keys.indexOf(obsId);
+            if (idx >= 0 && idx < configNodes.length) {
+              nodePos = { x: configNodes[idx].x, y: configNodes[idx].y };
+            }
+          }
+          if (!nodePos) return;
+
+          // Weight = how much this observer's signal is disturbed
+          // Higher delta → person is closer to the AP-node line for this observer
+          var weight = Math.max(0.01, absDelta);  // minimum weight to prevent division by zero
+
+          // The person is on the AP-node line, distance proportional to delta
+          // delta / maxExpectedDelta → 0-1 range → position along the line
+          var t = Math.min(1.0, absDelta / 10.0);  // 10 dBm = person right in the middle
+          var pointX = ap.x + (nodePos.x - ap.x) * 0.5;  // midpoint base
+          var pointY = ap.y + (nodePos.y - ap.y) * 0.5;
+
+          // Shift toward the observer if delta is very high (person closer to observer)
+          pointX += (nodePos.x - ap.x) * (t - 0.5) * 0.3;
+          pointY += (nodePos.y - ap.y) * (t - 0.5) * 0.3;
+
+          weightedX += pointX * weight;
+          weightedY += pointY * weight;
+          totalWeight += weight;
+          if (absDelta > maxDelta) maxDelta = absDelta;
+        });
+
+        if (totalWeight > 0) {
+          var measuredX = weightedX / totalWeight;
+          var measuredY = weightedY / totalWeight;
+
+          // Add small variance-based jitter for liveliness (person is moving!)
+          var variance = 0;
+          Object.values(data.fusion.observers_rssi).forEach(function(o) {
+            variance = Math.max(variance, o.variance || 0);
+          });
+          var jitterScale = Math.min(0.3, variance * 0.1);
+          measuredX += (Math.random() - 0.5) * jitterScale;
+          measuredY += (Math.random() - 0.5) * jitterScale;
+
+          // Smooth position (EMA)
+          if (!self._positionInitialized) {
+            self._estimatedPosition.x = measuredX;
+            self._estimatedPosition.y = measuredY;
+            self._positionInitialized = true;
+          } else {
+            var alpha = self._positionSmoothing;
+            self._estimatedPosition.x += (measuredX - self._estimatedPosition.x) * alpha;
+            self._estimatedPosition.y += (measuredY - self._estimatedPosition.y) * alpha;
+          }
+
+          var conf = data.fusion.confidence || 0.5;
+          var personPositions = [{
+            id: 'person-detected',
+            name: 'Person',
+            position: { x: self._estimatedPosition.x, y: self._estimatedPosition.y },
+            confidence: conf,
+            errorRadius: Math.max(0.8, 2.5 * (1 - conf)),
+            color: '#ef4444'
+          }];
+
+          if (self.renderer && typeof self.renderer.updateTrackedDevices === 'function') {
+            self.renderer.updateTrackedDevices(personPositions);
+          }
+          if (typeof dash.setTrackedDevices === 'function') {
+            dash.setTrackedDevices(personPositions);
           }
         }
-        if (!nodePos && idx < configNodes.length) {
-          nodePos = { x: configNodes[idx].x, y: configNodes[idx].y };
-        }
-        if (nodePos) disturbedPositions.push(nodePos);
-      });
-
-      // Calculate person position: weighted centroid of midpoints (AP ↔ each disturbed node)
-      var personX = 0, personY = 0;
-      if (disturbedPositions.length > 0) {
-        disturbedPositions.forEach(function(np) {
-          personX += (ap.x + np.x) / 2;
-          personY += (ap.y + np.y) / 2;
-        });
-        personX /= disturbedPositions.length;
-        personY /= disturbedPositions.length;
       } else {
-        personX = ap.x + 1;
-        personY = ap.y;
-      }
-
-      var conf = data.fusion.confidence || 0.5;
-      var personPositions = [{
-        id: 'person-detected',
-        name: 'Person',
-        position: { x: personX, y: personY },
-        confidence: conf,
-        errorRadius: Math.max(1.0, 2.5 * (1 - conf)),
-        color: '#ef4444'
-      }];
-
-      if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
-        this.renderer.updateTrackedDevices(personPositions);
-      }
-      if (typeof dash.setTrackedDevices === 'function') {
-        dash.setTrackedDevices(personPositions);
+        // No presence — clear person dot (fade out via empty array)
+        if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
+          this.renderer.updateTrackedDevices([]);
+        }
+        if (typeof dash.setTrackedDevices === 'function') {
+          dash.setTrackedDevices([]);
+        }
+        this._positionInitialized = false;
       }
     }
 

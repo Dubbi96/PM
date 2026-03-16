@@ -13,8 +13,10 @@ Requires: Python 3.7+ (stdlib only)
 """
 
 import argparse
+import collections
 import http.client
 import json
+import logging
 import socket
 import struct
 import sys
@@ -27,6 +29,12 @@ VITALS_MAGIC = 0xC5110002
 
 # Rolling RSSI buffer for variance calculation
 RSSI_BUFFER_MAX = 60
+
+# Rapid-change detection: threshold in dBm over a sliding window
+RAPID_CHANGE_THRESHOLD_DBM = 3.0
+RAPID_CHANGE_WINDOW_SEC = 2.0
+
+logger = logging.getLogger("esp32-bridge")
 
 
 def parse_csi_frame(data):
@@ -97,6 +105,13 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
+    # Configure logging for movement events
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     # UDP socket (SO_REUSEADDR + SO_REUSEPORT to prevent "Address already in use")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -116,6 +131,8 @@ def main():
 """)
 
     rssi_buffer = []
+    # Timestamped RSSI samples for rapid-change detection: deque of (timestamp, rssi)
+    rssi_ts_buffer = collections.deque()
     seq = 0
     last_send = 0
     send_interval = 1.0  # Send to server every 1 second
@@ -142,9 +159,35 @@ def main():
                     frame = parse_csi_frame(data)
                     if frame:
                         csi_count += 1
-                        rssi_buffer.append(frame["rssi"])
+                        sample_time = time.time()
+                        rssi_val = frame["rssi"]
+                        rssi_buffer.append(rssi_val)
                         if len(rssi_buffer) > RSSI_BUFFER_MAX:
                             rssi_buffer.pop(0)
+
+                        # Track timestamped samples for rapid-change detection
+                        rssi_ts_buffer.append((sample_time, rssi_val))
+                        # Evict samples older than the detection window
+                        cutoff = sample_time - RAPID_CHANGE_WINDOW_SEC
+                        while rssi_ts_buffer and rssi_ts_buffer[0][0] < cutoff:
+                            rssi_ts_buffer.popleft()
+                        # Detect rapid change within the window
+                        if len(rssi_ts_buffer) >= 2:
+                            window_rssi = [r for _, r in rssi_ts_buffer]
+                            delta = max(window_rssi) - min(window_rssi)
+                            if delta > RAPID_CHANGE_THRESHOLD_DBM:
+                                direction = "approaching" if window_rssi[-1] > window_rssi[0] else "leaving"
+                                logger.info(
+                                    "MOVEMENT detected: RSSI delta=%.1f dBm in %.1fs (%s)",
+                                    delta,
+                                    sample_time - rssi_ts_buffer[0][0],
+                                    direction,
+                                )
+                                if args.verbose:
+                                    print(
+                                        f"  \033[33m*** MOVEMENT: RSSI delta={delta:.1f}dBm "
+                                        f"({direction})\033[0m"
+                                    )
 
                 elif magic == VITALS_MAGIC:
                     last_vitals = parse_vitals(data)
@@ -157,6 +200,15 @@ def main():
                 # Calculate stats
                 mean_rssi = sum(rssi_buffer) / len(rssi_buffer)
                 variance = sum((r - mean_rssi) ** 2 for r in rssi_buffer) / len(rssi_buffer) if len(rssi_buffer) > 1 else 0
+
+                # RSSI trend: compare recent 5 samples vs older 5 samples
+                # positive = signal getting stronger (person approaching)
+                # negative = signal getting weaker (person leaving)
+                rssi_trend = 0.0
+                if len(rssi_buffer) >= 5:
+                    recent = rssi_buffer[-5:]
+                    older = rssi_buffer[-10:-5] if len(rssi_buffer) >= 10 else rssi_buffer[:5]
+                    rssi_trend = sum(recent) / len(recent) - sum(older) / len(older)
 
                 # Build observer scan payload
                 bssid = "ESP32-CSI-NODE"
@@ -196,6 +248,9 @@ def main():
                         "presence": presence_state,
                         "confidence": round(confidence, 3),
                         "subcarriers": 64,
+                        "rssi_trend": round(rssi_trend, 2),  # dBm/s direction
+                        "rssi_min": min(rssi_buffer),
+                        "rssi_max": max(rssi_buffer),
                     },
                 }
 
@@ -205,8 +260,11 @@ def main():
                     v_info = ""
                     if last_vitals:
                         v_info = f" presence={presence_state} motion={last_vitals['motion_energy']:.3f}"
+                    trend_arrow = "+" if rssi_trend > 0.5 else ("-" if rssi_trend < -0.5 else "=")
                     print(
                         f"  [{seq:>4}] RSSI={mean_rssi:>6.1f}dBm var={variance:>5.2f} "
+                        f"trend={rssi_trend:>+5.1f}({trend_arrow}) "
+                        f"[{min(rssi_buffer)}/{max(rssi_buffer)}] "
                         f"CSI={csi_count:>3}/s{v_info} → HTTP {status}"
                     )
 
