@@ -1388,29 +1388,52 @@ class LocationApp {
       }
     }
 
-    // Generate person positions from fusion zones (server / pc-rssi mode)
-    if (data.fusion && data.fusion.zones) {
-      var personPositions = [];
+    // Generate ONE person dot from all disturbed observers
+    // Multiple disturbed observers → person is at the intersection (centroid)
+    if (data.fusion && data.fusion.disturbedObservers && data.fusion.disturbedObservers.length > 0) {
       var self = this;
+      var ap = (this.config.accessPoints || [])[0] || { x: 0, y: 0 };
+      var configNodes = this.config.nodes || [];
 
-      Object.keys(data.fusion.zones).forEach(function(zoneId) {
-        var zone = data.fusion.zones[zoneId];
-        if (zone.occupied) {
-          var basePos = self._getZoneCenter(zoneId);
-          if (basePos) {
-            // Add slight offset based on confidence (higher confidence = closer to center)
-            var conf = zone.confidence || 0.5;
-            personPositions.push({
-              id: 'detected-' + zoneId,
-              name: zone.name || zoneId,
-              position: basePos,
-              confidence: conf,
-              errorRadius: Math.max(1.0, 3.0 * (1 - conf)),  // smaller circle = more confident
-              color: '#ef4444'  // RED for all detected persons
-            });
+      // Collect positions of all disturbed observer nodes
+      var disturbedPositions = [];
+      data.fusion.disturbedObservers.forEach(function(obsId, idx) {
+        var nodePos = null;
+        for (var i = 0; i < configNodes.length; i++) {
+          if (configNodes[i].id === obsId || configNodes[i].name === obsId) {
+            nodePos = { x: configNodes[i].x, y: configNodes[i].y };
+            break;
           }
         }
+        if (!nodePos && idx < configNodes.length) {
+          nodePos = { x: configNodes[idx].x, y: configNodes[idx].y };
+        }
+        if (nodePos) disturbedPositions.push(nodePos);
       });
+
+      // Calculate person position: weighted centroid of midpoints (AP ↔ each disturbed node)
+      var personX = 0, personY = 0;
+      if (disturbedPositions.length > 0) {
+        disturbedPositions.forEach(function(np) {
+          personX += (ap.x + np.x) / 2;
+          personY += (ap.y + np.y) / 2;
+        });
+        personX /= disturbedPositions.length;
+        personY /= disturbedPositions.length;
+      } else {
+        personX = ap.x + 1;
+        personY = ap.y;
+      }
+
+      var conf = data.fusion.confidence || 0.5;
+      var personPositions = [{
+        id: 'person-detected',
+        name: 'Person',
+        position: { x: personX, y: personY },
+        confidence: conf,
+        errorRadius: Math.max(1.0, 2.5 * (1 - conf)),
+        color: '#ef4444'
+      }];
 
       if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
         this.renderer.updateTrackedDevices(personPositions);
