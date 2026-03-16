@@ -682,9 +682,17 @@ class LocationApp {
       var obsResp = await fetch('/api/observers/status');
       if (obsResp.ok) {
         var obsData = await obsResp.json();
-        console.log('[LocationApp] Observer server detected — switching to pc-rssi mode');
-        this.state.mode = 'pc-rssi';
-        this.state.source = 'pc-rssi';
+        // Detect if ESP32 CSI data is flowing (observer platform = 'esp32-s3')
+        var hasEsp32 = false;
+        if (obsData.observers) {
+          Object.values(obsData.observers).forEach(function(o) {
+            if (o.platform === 'esp32-s3') hasEsp32 = true;
+          });
+        }
+        var detectedMode = hasEsp32 ? 'rssi+csi' : 'pc-rssi';
+        console.log('[LocationApp] Observer server detected — mode: ' + detectedMode);
+        this.state.mode = detectedMode;
+        this.state.source = hasEsp32 ? 'esp32-csi' : 'pc-rssi';
         this.state.serverStatus = 'online';
         this.state.connected = true;
 
@@ -1747,7 +1755,8 @@ class LocationApp {
       case 'rssi+csi':
         this.state.source = 'esp32-csi';
         this.state.mode = 'rssi+csi';
-        this._startPolling();
+        // Use observer polling if observer-server is available (ESP32 bridge sends data there)
+        this._startPcRssiPolling();
         break;
 
       case 'pc-rssi':

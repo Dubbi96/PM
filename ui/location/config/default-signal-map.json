@@ -19,6 +19,14 @@
   ],
   "nodes": [
     {
+      "id": "esp32-node-1",
+      "name": "ESP32-S3",
+      "x": 3.0,
+      "y": 0.0,
+      "type": "esp32-s3",
+      "status": "disconnected"
+    },
+    {
       "id": "pc-node-1",
       "name": "PC 1",
       "x": -5.0,
