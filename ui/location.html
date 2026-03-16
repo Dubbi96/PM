@@ -195,21 +195,24 @@
      ================================================================ */
 
   // React (resolved via importmap -> single instance)
-  // React — self-contained URL, no importmap needed
-  const ReactModule = await import('https://esm.sh/react@18.2.0');
-  const React = ReactModule.default;
-  const { useState, useEffect, useRef, useCallback, useMemo } = ReactModule;
+  // React + MUI: all loaded from esm.sh with ?no-dts&bundle to avoid
+  // sub-dependency resolution issues (clsx, @mui/utils, etc.)
+  const _v = 'v135';  // esm.sh build version pin (avoids stale cache)
+  const ReactModule = await import('https://esm.sh/v135/react@18.2.0/es2022/react.mjs');
+  const React = ReactModule.default || ReactModule;
+  const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-  const { createRoot } = await import('https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0');
+  const { createRoot } = await import('https://esm.sh/v135/react-dom@18.2.0/es2022/client.js');
 
-  // MUI — deps param pins React version inside the bundle (single instance)
+  // MUI — single pre-built bundle with all deps included
+  const MUI = await import('https://esm.sh/v135/@mui/material@5.15.20/es2022/material.mjs');
   const {
     ThemeProvider, createTheme, CssBaseline,
     Box, Typography, Paper, Chip, IconButton, LinearProgress,
     Avatar, Badge, Card, CardContent, Grid, Stack, Divider,
     List, ListItem, ListItemIcon, ListItemText,
     AppBar, Toolbar, Tooltip, Alert, Button
-  } = await import('https://esm.sh/@mui/material@5.15.20?deps=react@18.2.0,react-dom@18.2.0');
+  } = MUI;
 
   // Expose React globally for signal-mesh.js, app.js, etc.
   window.React = React;
