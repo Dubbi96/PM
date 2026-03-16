@@ -33,7 +33,7 @@
     this.referenceRssi     = tri.referenceRssi     || -30;    // dBm at referenceDistance
     this.positionSmoothing = (tri.positionSmoothing !== undefined)
                                ? tri.positionSmoothing
-                               : 0.7;
+                               : 0.4;
 
     this.config = config;
 
@@ -361,15 +361,36 @@
   // ── Position smoothing ─────────────────────────────────────────
 
   /**
-   * Exponential moving average:
-   * new_pos = alpha * measured + (1 - alpha) * previous
+   * Exponential moving average with velocity-based prediction.
+   *
+   * Instead of smoothing between the raw measurement and the previous position,
+   * we smooth between the measurement and a velocity-predicted position.
+   * This reduces lag for moving targets while keeping stationary targets smooth.
+   *
+   * predicted = prev + velocity * dt
+   * new_pos   = alpha * measured + (1 - alpha) * predicted
+   *
+   * @param {Object} prev     Previous position { x, y }
+   * @param {Object} curr     New measured position { x, y }
+   * @param {number} factor   Smoothing factor (alpha): 0 = all prediction, 1 = all measurement
+   * @param {Object} [velocity]  Optional { vx, vy } in units/second
+   * @param {number} [dt]     Optional time delta in seconds since last update
    */
-  TrilaterationEngine.prototype._smoothPosition = function (prev, curr, factor) {
+  TrilaterationEngine.prototype._smoothPosition = function (prev, curr, factor, velocity, dt) {
     if (!prev) return curr;
     var alpha = factor;
+
+    // Velocity-based prediction: extrapolate from previous position
+    var predictedX = prev.x;
+    var predictedY = prev.y;
+    if (velocity && dt && dt > 0 && dt < 10) {
+      predictedX += velocity.vx * dt;
+      predictedY += velocity.vy * dt;
+    }
+
     return {
-      x: alpha * curr.x + (1 - alpha) * prev.x,
-      y: alpha * curr.y + (1 - alpha) * prev.y
+      x: alpha * curr.x + (1 - alpha) * predictedX,
+      y: alpha * curr.y + (1 - alpha) * predictedY
     };
   };
 
@@ -413,12 +434,12 @@
       this.trackedDevices[deviceId] = existing;
     }
 
-    // Apply smoothing
-    var prevPos = existing.position;
-    var smoothed = this._smoothPosition(prevPos, estimate, this.positionSmoothing);
-
-    // Compute velocity (units per second)
+    // Compute time delta for velocity prediction
     var dt = (now - existing.lastSeen) / 1000;
+
+    // Apply smoothing with velocity-based prediction
+    var prevPos = existing.position;
+    var smoothed = this._smoothPosition(prevPos, estimate, this.positionSmoothing, existing.velocity, dt);
     var vx = 0, vy = 0;
     if (dt > 0 && dt < 10) {
       vx = (smoothed.x - prevPos.x) / dt;

@@ -247,6 +247,8 @@
         name: person.name,
         rssiByNode: rssiByNode,
         truePosition: { x: Math.round(person.x * 100) / 100, y: Math.round(person.y * 100) / 100 },
+        vx: person.vx || 0,
+        vy: person.vy || 0,
         color: person.color,
         state: person.state
       });

@@ -85,6 +85,7 @@
     this.tickRate = 2;        // 2 Hz (matches real observer scan interval)
     this.tick = 0;
     this._intervalId = null;
+    this._positionIntervalId = null;  // 10 Hz internal position update
 
     // ── Signal model parameters ──────────────────────────────────────
     var sm = (config && config.signalMap) || {};
@@ -169,6 +170,14 @@
     this._intervalId = setInterval(function () {
       self._tick();
     }, intervalMs);
+
+    // Internal 10 Hz position update for smoother person movement
+    // (RSSI data still emitted at 2 Hz via _tick)
+    this._positionIntervalId = setInterval(function () {
+      if (self.calibrated) {
+        self._updatePersons(0.1);
+      }
+    }, 100);
   };
 
   /** Stop generating data. */
@@ -178,6 +187,10 @@
     if (this._intervalId !== null) {
       clearInterval(this._intervalId);
       this._intervalId = null;
+    }
+    if (this._positionIntervalId !== null) {
+      clearInterval(this._positionIntervalId);
+      this._positionIntervalId = null;
     }
   };
 
@@ -253,6 +266,8 @@
         id: person.id,
         x: Math.round(person.x * 100) / 100,
         y: Math.round(person.y * 100) / 100,
+        vx: person.vx || 0,
+        vy: person.vy || 0,
         state: person.state,
         color: person.color
       });
@@ -271,12 +286,9 @@
 
   ObserverSimulator.prototype._tick = function () {
     this.tick++;
-    var dt = 1.0 / this.tickRate;
 
-    // Update person movement (only after calibration)
-    if (this.calibrated) {
-      this._updatePersons(dt);
-    }
+    // Person positions are updated at 10 Hz by _positionIntervalId.
+    // This tick only generates RSSI readings at 2 Hz.
 
     // Generate RSSI for each observer
     for (var i = 0; i < this.observers.length; i++) {
@@ -449,9 +461,9 @@
             person.vx = (dx / d) * person.speed;
             person.vy = (dy / d) * person.speed;
 
-            // Slight random drift for natural movement
-            person.vx += gaussianRandom() * 0.05;
-            person.vy += gaussianRandom() * 0.05;
+            // Slight random drift for natural movement (reduced for smoother paths)
+            person.vx += gaussianRandom() * 0.02;
+            person.vy += gaussianRandom() * 0.02;
 
             person.x += person.vx * dt;
             person.y += person.vy * dt;
@@ -463,9 +475,9 @@
           break;
 
         case 'stationary':
-          // Tiny idle drift
-          person.x += gaussianRandom() * 0.005;
-          person.y += gaussianRandom() * 0.005;
+          // Very small idle drift (reduced for smoother output)
+          person.x += gaussianRandom() * 0.001;
+          person.y += gaussianRandom() * 0.001;
 
           person.pauseTimer -= dt;
           if (person.pauseTimer <= 0) {

@@ -53,6 +53,8 @@ var SM_CONTOUR_COLORS = {
 var SM_PULSE_SPEED_STILL = Math.PI;       // 2s full cycle
 var SM_PULSE_SPEED_ACTIVE = Math.PI * 2;  // 1s full cycle
 
+var MAX_TRAIL_POINTS = 60;
+
 // Speed of light for Fresnel calculation
 var SM_SPEED_OF_LIGHT = 299792458; // m/s
 
@@ -176,10 +178,21 @@ var SignalMeshRenderer = (function() {
     // Tracked devices for multi-person visualization
     this._trackedDevices = [];
 
+    // Smoothly interpolated render positions per device id
+    this._deviceRenderPositions = {};
+
+    // Smooth trail state: id -> [{x, y}] canvas-space trail points
+    this._deviceTrails = {};
+
     // Animation
     this._animationId = null;
     this._startTime = performance.now();
     this._apRadiationPhase = 0; // for radiating circles anim
+
+    // Smooth detection overlay state (lerped each frame)
+    this._overlayAlpha = 0;        // current rendered alpha (smoothly interpolated)
+    this._overlayTargetAlpha = 0;  // target alpha based on presence state
+    this._overlayLabelAlpha = 0;   // smoothly interpolated label opacity
 
     // Interaction
     this._areaClickCb = null;
@@ -294,6 +307,24 @@ var SignalMeshRenderer = (function() {
    */
   SignalMeshRenderer.prototype.updateTrackedDevices = function(devices) {
     this._trackedDevices = devices || [];
+
+    // Clean up stale render positions for removed devices
+    var activeIds = {};
+    for (var i = 0; i < this._trackedDevices.length; i++) {
+      if (this._trackedDevices[i].id) activeIds[this._trackedDevices[i].id] = true;
+    }
+    for (var rid in this._deviceRenderPositions) {
+      if (this._deviceRenderPositions.hasOwnProperty(rid) && !activeIds[rid]) {
+        delete this._deviceRenderPositions[rid];
+      }
+    }
+
+    // Clean up stale trail data for removed devices
+    for (var tid in this._deviceTrails) {
+      if (this._deviceTrails.hasOwnProperty(tid) && !activeIds[tid]) {
+        delete this._deviceTrails[tid];
+      }
+    }
   };
 
   /** Recalculate canvas dimensions and scale to fit container. */
@@ -881,14 +912,43 @@ var SignalMeshRenderer = (function() {
   /** @private */
   SignalMeshRenderer.prototype._drawDetectionOverlay = function() {
     var state = this._presence.state;
-    if (state === 'absent') return;
-
     var ctx = this._ctx;
     var elapsed = (performance.now() - this._startTime) / 1000;
 
+    // --- Determine target alpha based on presence state ---
+    var targetAlpha;
+    var targetLabelAlpha;
+    if (state === 'active') {
+      targetAlpha = 0.25;
+      targetLabelAlpha = 0.85;
+    } else if (state === 'present_still') {
+      targetAlpha = 0.12;
+      targetLabelAlpha = 0.65;
+    } else {
+      targetAlpha = 0;
+      targetLabelAlpha = 0;
+    }
+
+    // --- Smooth transition (lerp towards target each frame) ---
+    this._overlayAlpha += (targetAlpha - this._overlayAlpha) * 0.05;
+    this._overlayLabelAlpha += (targetLabelAlpha - this._overlayLabelAlpha) * 0.05;
+
+    // Clamp near-zero to zero to avoid sub-pixel rendering waste
+    if (this._overlayAlpha < 0.003) {
+      this._overlayAlpha = 0;
+      this._overlayLabelAlpha = 0;
+    }
+
+    // Nothing to draw if fully faded out
+    if (this._overlayAlpha < 0.005) return;
+
+    // --- Subtle breathing — NOT aggressive pulse ---
+    // +/- 10% variation at a slow 1.2 rad/s cycle
+    var breathe = 1.0 + 0.1 * Math.sin(elapsed * 1.2);
+    var finalAlpha = this._overlayAlpha * breathe;
+    var finalLabelAlpha = this._overlayLabelAlpha * breathe;
+
     var isActive = (state === 'active');
-    var pulseSpeed = isActive ? SM_PULSE_SPEED_ACTIVE : SM_PULSE_SPEED_STILL;
-    var pulse = 0.5 + 0.5 * Math.sin(elapsed * pulseSpeed);
 
     ctx.save();
 
@@ -912,32 +972,29 @@ var SignalMeshRenderer = (function() {
         var majorPx = (totalDist / 2) * this._scale;
         var minorPx = maxR * this._scale;
 
-        // Neon glow fill over Fresnel zone
-        var baseAlpha = isActive ? 0.3 : 0.12;
-        var glowAlpha = baseAlpha * (0.6 + 0.4 * pulse);
-
+        // Smooth green glow fill over Fresnel zone
         ctx.save();
         ctx.shadowColor = SM_NEON_GREEN;
-        ctx.shadowBlur = isActive ? 25 : 12;
+        ctx.shadowBlur = isActive ? 18 : 10;
 
         ctx.beginPath();
         ctx.ellipse(midCx, midCy, majorPx, minorPx, angle, 0, Math.PI * 2);
-        ctx.fillStyle = smNeonRgba(glowAlpha);
+        ctx.fillStyle = smNeonRgba(finalAlpha.toFixed(3));
         ctx.fill();
 
-        // Neon border
-        ctx.strokeStyle = smNeonRgba(0.4 + 0.3 * pulse);
-        ctx.lineWidth = isActive ? 2 : 1;
+        // Subtle glow border
+        ctx.strokeStyle = smNeonRgba((finalAlpha * 1.5).toFixed(3));
+        ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.restore();
 
-        // Ripple effect for ACTIVE state
-        if (isActive) {
-          var numRipples = 3;
+        // Gentle ripple for ACTIVE state only (slower, fewer, lower alpha)
+        if (isActive && this._overlayAlpha > 0.1) {
+          var numRipples = 2;
           for (var ri = 0; ri < numRipples; ri++) {
-            var ripplePhase = (elapsed * 1.5 + ri * 0.33) % 1.0;
-            var rippleScale = 0.5 + ripplePhase * 0.8;
-            var rippleAlpha = (1 - ripplePhase) * 0.2;
+            var ripplePhase = (elapsed * 0.6 + ri * 0.5) % 1.0;
+            var rippleScale = 0.7 + ripplePhase * 0.5;
+            var rippleAlpha = (1 - ripplePhase) * 0.08 * (this._overlayAlpha / 0.25);
 
             ctx.beginPath();
             ctx.ellipse(
@@ -945,19 +1002,21 @@ var SignalMeshRenderer = (function() {
               majorPx * rippleScale, minorPx * rippleScale,
               angle, 0, Math.PI * 2
             );
-            ctx.strokeStyle = smNeonRgba(rippleAlpha);
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = smNeonRgba(rippleAlpha.toFixed(3));
+            ctx.lineWidth = 1;
             ctx.stroke();
           }
         }
 
-        // Detection label
-        var labelText = isActive ? '\uAC10\uC9C0\uB428 \u2014 \uD65C\uB3D9 \uC911' : '\uAC10\uC9C0\uB428 \u2014 \uC815\uC9C0 \uC911';
-        ctx.font = SM_SMALL_FONT;
-        ctx.fillStyle = smNeonRgba(0.7 + 0.3 * pulse);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(labelText, midCx, midCy + minorPx + 8);
+        // Detection label — fades smoothly with the overlay
+        if (finalLabelAlpha > 0.01) {
+          var labelText = isActive ? '\uAC10\uC9C0\uB428 \u2014 \uD65C\uB3D9 \uC911' : '\uAC10\uC9C0\uB428 \u2014 \uC815\uC9C0 \uC911';
+          ctx.font = SM_SMALL_FONT;
+          ctx.fillStyle = smNeonRgba(finalLabelAlpha.toFixed(3));
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText(labelText, midCx, midCy + minorPx + 8);
+        }
       }
     }
 
@@ -975,29 +1034,49 @@ var SignalMeshRenderer = (function() {
     var ctx = this._ctx;
     var elapsed = (performance.now() - this._startTime) / 1000;
 
+    // Slow, subtle breathing: oscillates between 0.7 and 1.0 over ~4s cycle
+    var breathe = 0.7 + 0.3 * Math.sin(elapsed * 1.5);
+
     ctx.save();
 
     for (var di = 0; di < this._trackedDevices.length; di++) {
       var device = this._trackedDevices[di];
       if (!device.position) continue;
 
-      var pos = this._worldToCanvas(device.position.x, device.position.y);
-      var px = pos[0];
-      var py = pos[1];
+      // --- Position interpolation (lerp) for smooth movement ---
+      var targetPos = this._worldToCanvas(device.position.x, device.position.y);
+      var targetX = targetPos[0];
+      var targetY = targetPos[1];
+      var renderId = device.id || ('_dev_' + di);
+
+      if (!this._deviceRenderPositions[renderId]) {
+        this._deviceRenderPositions[renderId] = { x: targetX, y: targetY };
+      }
+      var rp = this._deviceRenderPositions[renderId];
+      var lerpFactor = 0.12;
+      rp.x += (targetX - rp.x) * lerpFactor;
+      rp.y += (targetY - rp.y) * lerpFactor;
+      var px = rp.x;
+      var py = rp.y;
+
       var color = device.color || SM_NEON_GREEN;
       var rgb = smHexToRgb(color);
       var errorRadius = device.errorRadius || 1.0;
       var errorRadiusPx = errorRadius * this._scale;
 
-      // Pulse animation per device (offset by index to avoid sync)
-      var pulse = 0.5 + 0.5 * Math.sin(elapsed * SM_PULSE_SPEED_STILL + di * 1.2);
+      // Helper: device color with specified alpha (IIFE to capture rgb values)
+      var deviceColorWithAlpha = (function(r, g, b) {
+        return function(a) {
+          return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+        };
+      })(rgb.r, rgb.g, rgb.b);
 
       // --- 1. RSSI lines: dashed lines from device to each connected node ---
       if (device.rssiByNode) {
         ctx.save();
-        ctx.setLineDash([4, 6]);
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
         ctx.font = SM_TINY_FONT;
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
         ctx.textAlign = 'center';
@@ -1047,83 +1126,113 @@ var SignalMeshRenderer = (function() {
         ctx.restore();
       }
 
-      // --- 2. Confidence circle ---
+      // --- 2. Confidence circle — always visible, no animation ---
       ctx.save();
       ctx.beginPath();
       ctx.arc(px, py, errorRadiusPx, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.1)';
+      ctx.fillStyle = deviceColorWithAlpha(0.06);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.4)';
+      ctx.strokeStyle = deviceColorWithAlpha(0.25);
       ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
       ctx.stroke();
-      ctx.setLineDash([]);
       ctx.restore();
 
-      // --- 3. Trail: fading history path ---
-      if (device.history && device.history.length > 1) {
+      // --- 3. Trail: smooth canvas-space trail from lerped positions ---
+      if (!this._deviceTrails[renderId]) {
+        this._deviceTrails[renderId] = [];
+      }
+      var trail = this._deviceTrails[renderId];
+
+      // Add new point only when position has moved enough (throttle)
+      var lastPoint = trail[trail.length - 1];
+      if (!lastPoint || Math.abs(px - lastPoint.x) > 1 || Math.abs(py - lastPoint.y) > 1) {
+        trail.push({ x: px, y: py });
+        if (trail.length > MAX_TRAIL_POINTS) trail.shift();
+      }
+
+      // Draw smooth trail segments with gradient fade
+      if (trail.length >= 2) {
         ctx.save();
-        ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        var histLen = device.history.length;
 
-        for (var hi = 0; hi < histLen - 1; hi++) {
-          var segAlpha = smLerp(0.1, 0.6, hi / (histLen - 1));
+        for (var t = 1; t < trail.length; t++) {
+          var progress = t / trail.length;  // 0 = oldest, 1 = newest
+          var alpha = progress * 0.5;       // fade from 0 to 0.5
+          var width = 1 + progress * 2;     // thin to thick
+
           ctx.beginPath();
-          var hFrom = this._worldToCanvas(device.history[hi].x, device.history[hi].y);
-          var hTo = this._worldToCanvas(device.history[hi + 1].x, device.history[hi + 1].y);
-          ctx.moveTo(hFrom[0], hFrom[1]);
-          ctx.lineTo(hTo[0], hTo[1]);
-          ctx.strokeStyle = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + segAlpha.toFixed(2) + ')';
+          ctx.moveTo(trail[t - 1].x, trail[t - 1].y);
+          ctx.lineTo(trail[t].x, trail[t].y);
+          ctx.strokeStyle = deviceColorWithAlpha(alpha.toFixed(2));
+          ctx.lineWidth = width;
           ctx.stroke();
         }
         ctx.restore();
       }
 
-      // --- 4. Position dot with pulsing glow ---
+      // --- 4. Position dot — ALWAYS VISIBLE, solid with subtle breathing glow ---
+
+      // Core dot — always fully visible, no blinking
+      ctx.beginPath();
+      ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fillStyle = deviceColorWithAlpha(0.9);
+      ctx.fill();
+
+      // Subtle outer glow — glow intensity breathes, dot stays solid
       ctx.save();
-
-      // Outer glow
       ctx.shadowColor = color;
-      ctx.shadowBlur = 15 * (0.7 + 0.3 * pulse);
+      ctx.shadowBlur = 12 * breathe;
       ctx.beginPath();
-      ctx.arc(px, py, 6, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fillStyle = deviceColorWithAlpha(0.9);
       ctx.fill();
-
-      // Inner bright core
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,' + (0.7 + 0.3 * pulse) + ')';
-      ctx.fill();
-
       ctx.restore();
 
-      // --- 5. Label: device name below the dot ---
-      if (device.name) {
-        ctx.save();
-        ctx.font = SM_TRACKED_LABEL_FONT;
-        var textW = ctx.measureText(device.name).width;
-        var pillW = textW + 12;
-        var pillH = 18;
-        var pillX = px - pillW / 2;
-        var pillY = py + 12;
+      // Bright center highlight
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fill();
 
-        // Semi-transparent dark pill background
-        ctx.fillStyle = 'rgba(10,14,24,0.75)';
-        ctx.strokeStyle = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.3)';
-        ctx.lineWidth = 1;
-        this._roundRect(ctx, pillX, pillY, pillW, pillH, 9);
+      // --- 5. Name label with dark background pill ---
+      var labelText = device.name || device.id;
+      if (labelText) {
+        ctx.save();
+        ctx.font = '11px "Inter", sans-serif';
+        var textWidth = ctx.measureText(labelText).width;
+        var labelX = px;
+        var labelY = py + 16;  // below the dot
+
+        // Dark pill background
+        ctx.fillStyle = 'rgba(10, 15, 26, 0.8)';
+        var pillPadX = 6, pillPadY = 3;
+        var pillW = textWidth + pillPadX * 2;
+        var pillH = 14 + pillPadY * 2;
+        var pillR = 4;
+        ctx.beginPath();
+        // Rounded rect
+        ctx.moveTo(labelX - pillW / 2 + pillR, labelY - pillPadY);
+        ctx.lineTo(labelX + pillW / 2 - pillR, labelY - pillPadY);
+        ctx.quadraticCurveTo(labelX + pillW / 2, labelY - pillPadY, labelX + pillW / 2, labelY - pillPadY + pillR);
+        ctx.lineTo(labelX + pillW / 2, labelY + pillH - pillPadY - pillR);
+        ctx.quadraticCurveTo(labelX + pillW / 2, labelY + pillH - pillPadY, labelX + pillW / 2 - pillR, labelY + pillH - pillPadY);
+        ctx.lineTo(labelX - pillW / 2 + pillR, labelY + pillH - pillPadY);
+        ctx.quadraticCurveTo(labelX - pillW / 2, labelY + pillH - pillPadY, labelX - pillW / 2, labelY + pillH - pillPadY - pillR);
+        ctx.lineTo(labelX - pillW / 2, labelY - pillPadY + pillR);
+        ctx.quadraticCurveTo(labelX - pillW / 2, labelY - pillPadY, labelX - pillW / 2 + pillR, labelY - pillPadY);
         ctx.fill();
+
+        // Border matching device color
+        ctx.strokeStyle = deviceColorWithAlpha(0.3);
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         // Text
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(device.name, px, pillY + pillH / 2);
+        ctx.textBaseline = 'top';
+        ctx.fillText(labelText, labelX, labelY + 1);
         ctx.restore();
       }
     }
