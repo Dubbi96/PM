@@ -1060,9 +1060,17 @@ class LocationApp {
       ? this.trilateration.activeNodeCount()
       : (this.state.nodes ? this.state.nodes.filter(function(n) { return n.connected; }).length : 0);
 
-    // Forward tracked devices to renderer
+    // Forward tracked devices to renderer (ensure array)
+    var devArray = Array.isArray(devices) ? devices : (devices && typeof devices === 'object' ? Object.values(devices) : []);
     if (this.renderer && typeof this.renderer.updateTrackedDevices === 'function') {
-      this.renderer.updateTrackedDevices(devices);
+      this.renderer.updateTrackedDevices(devArray);
+    }
+    // Also forward presence state to renderer
+    if (this.renderer && typeof this.renderer.updatePresence === 'function') {
+      this.renderer.updatePresence({
+        presence: this.state.presence,
+        confidence: this.state.confidence
+      });
     }
 
     // Update dashboard

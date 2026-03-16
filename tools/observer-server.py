@@ -551,6 +551,18 @@ def _reaper_loop(handler_cls: type, interval: float = 5.0):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _get_lan_ip():
+    """Get the machine's LAN IP address."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
 BANNER = """\
 \033[36m
 +================================================+
@@ -558,7 +570,7 @@ BANNER = """\
 |  Multi-PC RSSI Fusion Engine                   |
 +================================================+
 |  Dashboard:  http://localhost:{port:<14s}      |
-|  API:        http://localhost:{port}/api/      |
+|  LAN:        http://{lan_ip}:{port:<14s}      |
 |  Observers:  0 connected                       |
 +================================================+
 \033[0m"""
@@ -603,13 +615,15 @@ def main():
 
     # Print banner
     port_str = str(args.port)
-    print(BANNER.format(port=port_str))
+    lan_ip = _get_lan_ip()
+    print(BANNER.format(port=port_str, lan_ip=lan_ip))
     print(f"  UI dir:          {ObserverServer.ui_dir}")
     print(f"  Auto-calibrate:  {args.auto_calibrate}")
     print(f"  Verbose:         {args.verbose}")
     print()
     print("No observers connected yet. To add a PC observer:")
-    print(f"  python3 tools/pc-observer.py --id pc-node-1 --server http://localhost:{args.port}")
+    print(f"  \033[33m[같은 PC]\033[0m python3 tools/pc-observer.py --id pc-node-1 --server http://localhost:{args.port}")
+    print(f"  \033[33m[다른 PC]\033[0m python3 tools/pc-observer.py --id pc-node-2 --server http://{lan_ip}:{args.port}")
     print()
 
     # Start reaper thread

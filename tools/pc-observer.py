@@ -721,6 +721,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if not args.dry_run and not args.server:
         parser.error("--server is required when not using --dry-run.")
 
+    # Warn about 0.0.0.0 — not a connectable address from another machine
+    if args.server and "0.0.0.0" in args.server:
+        print(
+            "\033[33m[WARNING]\033[0m 0.0.0.0 is a listen address, not a connectable address.\n"
+            "          Use the server machine's actual IP instead.\n"
+            "          Example: --server http://192.168.1.100:8080\n"
+        )
+
     return args
 
 
