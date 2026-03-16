@@ -1,0 +1,69 @@
+{
+  "room": {
+    "name": "Default Room",
+    "width": 8.0,
+    "height": 6.0,
+    "unit": "m"
+  },
+  "zones": [
+    {
+      "id": "zone-entrance",
+      "name": "출입구",
+      "type": "entrance",
+      "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]],
+      "color": "#4CAF50",
+      "alertOnOccupancy": true
+    },
+    {
+      "id": "zone-desk",
+      "name": "책상 구역",
+      "type": "workspace",
+      "polygon": [[3, 0], [6, 0], [6, 3], [3, 3]],
+      "color": "#2196F3",
+      "alertOnOccupancy": false
+    },
+    {
+      "id": "zone-bed",
+      "name": "침대 구역",
+      "type": "rest",
+      "polygon": [[0, 3], [4, 3], [4, 6], [0, 6]],
+      "color": "#9C27B0",
+      "alertOnOccupancy": false
+    },
+    {
+      "id": "zone-common",
+      "name": "공용 구역",
+      "type": "common",
+      "polygon": [[2, 0], [3, 0], [3, 3], [6, 3], [6, 6], [4, 6], [4, 3], [2, 3]],
+      "color": "#FF9800",
+      "alertOnOccupancy": false
+    }
+  ],
+  "accessPoints": [
+    {
+      "id": "ap-main",
+      "name": "Main AP",
+      "x": 4.0,
+      "y": 0.5,
+      "type": "wifi-router"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-esp32-1",
+      "name": "ESP32 Node 1",
+      "x": 1.0,
+      "y": 3.0,
+      "type": "esp32-s3",
+      "status": "disconnected"
+    }
+  ],
+  "settings": {
+    "smoothingFactor": 0.85,
+    "detectionThreshold": 0.6,
+    "updateIntervalMs": 500,
+    "maxPersons": 5,
+    "showGrid": true,
+    "gridSize": 0.5
+  }
+}

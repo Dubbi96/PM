@@ -1,0 +1,75 @@
+{
+  "signalMap": {
+    "name": "My Space",
+    "gridResolution": 0.25,
+    "pathLossExponent": 3.0,
+    "referenceRssi": -30,
+    "unit": "m"
+  },
+  "accessPoints": [
+    {
+      "id": "ap-main",
+      "name": "Main Router",
+      "x": 0.0,
+      "y": 0.0,
+      "txPower": 20,
+      "frequency": 2437,
+      "channel": 6
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-esp32-1",
+      "name": "ESP32-S3 #1",
+      "x": 3.0,
+      "y": 2.0,
+      "type": "esp32-s3",
+      "status": "disconnected"
+    },
+    {
+      "id": "node-pc-1",
+      "name": "PC Monitor #1",
+      "x": -2.0,
+      "y": 3.5,
+      "type": "pc-monitor",
+      "status": "disconnected"
+    },
+    {
+      "id": "node-esp32-2",
+      "name": "ESP32-S3 #2",
+      "x": 5.0,
+      "y": -1.0,
+      "type": "esp32-s3",
+      "status": "disconnected"
+    }
+  ],
+  "detection": {
+    "presenceVarianceThreshold": 0.5,
+    "motionEnergyThreshold": 0.1,
+    "breathingBandHz": [0.1, 0.5],
+    "motionBandHz": [0.5, 3.0],
+    "smoothingFactor": 0.85,
+    "windowSeconds": 15,
+    "cusumThreshold": 3.0
+  },
+  "trilateration": {
+    "enabled": true,
+    "minNodes": 3,
+    "pathLossExponent": 3.0,
+    "referenceDistance": 1.0,
+    "referenceRssi": -30,
+    "maxTrackedDevices": 10,
+    "positionSmoothingFactor": 0.7,
+    "confidenceRadius": 2.0
+  },
+  "visualization": {
+    "meshRadius": 8.0,
+    "meshOpacity": 0.6,
+    "showFresnelZone": true,
+    "showSignalContours": true,
+    "contourLevels": [-30, -40, -50, -60, -70, -80],
+    "neonColor": "#00ff88",
+    "showGrid": true,
+    "gridSize": 0.5
+  }
+}

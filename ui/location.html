@@ -1,0 +1,1657 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PM Location — RSSI Mesh Detection Dashboard</title>
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300ff88' stroke-width='2' stroke-linecap='round'><path d='M12 2v8'/><circle cx='12' cy='14' r='4'/><path d='M12 18v4'/><path d='M8 14h-4'/><path d='M20 14h-4'/></svg>">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://esm.sh">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Import Map: single React instance for both our code and MUI -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react/": "https://esm.sh/react@18.2.0/",
+      "react-dom": "https://esm.sh/react-dom@18.2.0",
+      "react-dom/": "https://esm.sh/react-dom@18.2.0/"
+    }
+  }
+  </script>
+
+  <style>
+    /* ============================================================
+       PM Location Dashboard — Dark Theme + Green Neon
+       MUI + React via CDN — RSSI Mesh Detection
+       ============================================================ */
+
+    /* Fonts loaded via <link> tag in <head> — no @import needed */
+
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0f1a;
+      color: #e2e8f0;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #root {
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* ---- Scrollbar (dark) ---- */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+    /* ---- Green Neon Effects ---- */
+    .neon-green {
+      color: #00ff88;
+      text-shadow: 0 0 7px #00ff88, 0 0 10px #00ff88, 0 0 21px #00ff88, 0 0 42px #00c853;
+    }
+
+    .neon-green-subtle {
+      color: #00ff88;
+      text-shadow: 0 0 5px rgba(0, 255, 136, 0.5), 0 0 10px rgba(0, 255, 136, 0.2);
+    }
+
+    .neon-glow {
+      box-shadow: 0 0 5px #00ff88, 0 0 10px rgba(0, 255, 136, 0.3);
+    }
+
+    .neon-glow-border {
+      border: 1px solid rgba(0, 255, 136, 0.5) !important;
+      box-shadow: 0 0 5px rgba(0, 255, 136, 0.2), 0 0 10px rgba(0, 255, 136, 0.1), inset 0 0 5px rgba(0, 255, 136, 0.05);
+    }
+
+    .neon-pulse {
+      animation: neonPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes neonPulse {
+      0%, 100% { box-shadow: 0 0 5px #00ff88, 0 0 10px rgba(0, 255, 136, 0.3); }
+      50% { box-shadow: 0 0 10px #00ff88, 0 0 20px rgba(0, 255, 136, 0.5), 0 0 30px rgba(0, 255, 136, 0.2); }
+    }
+
+    @keyframes neonTextPulse {
+      0%, 100% {
+        text-shadow: 0 0 7px #00ff88, 0 0 10px #00ff88, 0 0 21px #00ff88, 0 0 42px #00c853;
+      }
+      50% {
+        text-shadow: 0 0 10px #00ff88, 0 0 15px #00ff88, 0 0 30px #00ff88, 0 0 60px #00c853;
+      }
+    }
+
+    @keyframes strongNeonPulse {
+      0%, 100% {
+        text-shadow: 0 0 10px #00ff88, 0 0 15px #00ff88, 0 0 30px #00ff88, 0 0 60px #00c853;
+        box-shadow: 0 0 10px rgba(0,255,136,0.4), 0 0 20px rgba(0,255,136,0.2);
+      }
+      50% {
+        text-shadow: 0 0 15px #00ff88, 0 0 25px #00ff88, 0 0 50px #00ff88, 0 0 80px #00c853;
+        box-shadow: 0 0 20px rgba(0,255,136,0.6), 0 0 40px rgba(0,255,136,0.3);
+      }
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(16px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes eventEnter {
+      from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.2); }
+    }
+
+    /* Canvas containers must not be React-managed */
+    .canvas-host {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .canvas-host canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Diagnostic canvas sizing */
+    .diag-canvas-wrap canvas {
+      width: 100%;
+      height: 60px;
+      display: block;
+    }
+
+    /* Loading overlay */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: #0a0f1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.6s ease;
+    }
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loader-ring {
+      width: 48px;
+      height: 48px;
+      border: 3px solid rgba(0,255,136,0.1);
+      border-top: 3px solid #00ff88;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading overlay (shown while ESM modules load) -->
+  <div id="loading-overlay">
+    <div class="loader-ring"></div>
+    <p style="color:#64748b; margin-top:16px; font-family:Inter,sans-serif; font-size:0.8rem;">대시보드 로딩 중...</p>
+  </div>
+
+  <!-- React mount point -->
+  <div id="root"></div>
+
+  <!-- Canvas elements kept OUTSIDE React to avoid reconciliation conflicts -->
+  <!-- They will be portaled / moved into React containers via refs -->
+
+  <script type="module">
+  /* ================================================================
+     PM Location Dashboard — React + MUI Dark Theme + Green Neon
+     ESM via importmap + esm.sh (no Babel, no UMD)
+     RSSI Mesh Detection Model
+     ================================================================ */
+
+  // React (resolved via importmap -> single instance)
+  import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+  import { createRoot } from 'react-dom/client';
+
+  // MUI (external=react,react-dom -> uses importmap React, no duplicate)
+  const {
+    ThemeProvider, createTheme, CssBaseline,
+    Box, Typography, Paper, Chip, IconButton, LinearProgress,
+    Avatar, Badge, Card, CardContent, Grid, Stack, Divider,
+    List, ListItem, ListItemIcon, ListItemText,
+    AppBar, Toolbar, Tooltip, Alert, Button
+  } = await import('https://esm.sh/@mui/material@5.15.20?external=react,react-dom');
+
+  // Expose React globally for signal-mesh.js, app.js, etc.
+  window.React = React;
+
+  // Hide loading overlay
+  const _loadEl = document.getElementById('loading-overlay');
+  if (_loadEl) _loadEl.classList.add('hidden');
+
+  // ---- Dark Theme ----
+  const darkTheme = createTheme({
+    palette: {
+      mode: 'dark',
+      background: {
+        default: '#0a0f1a',
+        paper: '#111827',
+      },
+      primary: { main: '#00ff88' },
+      secondary: { main: '#6366f1' },
+      success: { main: '#00ff88' },
+      warning: { main: '#fbbf24' },
+      error: { main: '#ef4444' },
+      text: {
+        primary: '#e2e8f0',
+        secondary: '#94a3b8',
+      },
+    },
+    typography: {
+      fontFamily: '"Inter", "Roboto", sans-serif',
+    },
+    shape: { borderRadius: 12 },
+    components: {
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            backgroundImage: 'none',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }
+        }
+      },
+      MuiCard: {
+        styleOverrides: {
+          root: {
+            backgroundImage: 'none',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }
+        }
+      },
+      MuiChip: {
+        styleOverrides: {
+          root: {
+            fontWeight: 500,
+          }
+        }
+      },
+      MuiLinearProgress: {
+        styleOverrides: {
+          root: {
+            borderRadius: 4,
+            height: 4,
+            backgroundColor: 'rgba(255,255,255,0.06)',
+          }
+        }
+      }
+    }
+  });
+
+  // ---- SVG icon strings (Streamline-style, thin line, minimal) ----
+  const SVG_ICONS = {
+    arrowRight: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>',
+    arrowLeft: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>',
+    arrowsHorizontal: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16l-4-4 4-4"/><path d="M17 8l4 4-4 4"/><path d="M3 12h18"/></svg>',
+    pulse: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 4 18 3-9h6"/></svg>',
+    alertTriangle: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    wifi: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>',
+    antenna: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v8"/><circle cx="12" cy="14" r="4"/><path d="M12 18v4"/><path d="M8 14h-4"/><path d="M20 14h-4"/></svg>',
+    barChart: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+    wave: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg>',
+  };
+
+  // Helper to create an inline SVG span element
+  function svgIcon(svgStr, size) {
+    return React.createElement('span', {
+      dangerouslySetInnerHTML: { __html: svgStr },
+      style: { display: 'inline-flex', alignItems: 'center', width: size || 16, height: size || 16 }
+    });
+  }
+
+  // ---- Event type metadata (RSSI-based) ----
+  const EVENT_META = {
+    enter:     { svgIcon: SVG_ICONS.arrowRight, label: '\uC9C4\uC785 \uAC10\uC9C0', color: '#00ff88' },
+    exit:      { svgIcon: SVG_ICONS.arrowLeft, label: '\uC774\uD0C8 \uAC10\uC9C0', color: '#64748b' },
+    motion:    { svgIcon: SVG_ICONS.arrowsHorizontal, label: '\uD65C\uB3D9 \uAC10\uC9C0', color: '#3b82f6' },
+    breathing: { svgIcon: SVG_ICONS.pulse, label: '\uD638\uD761 \uAC10\uC9C0', color: '#14b8a6' },
+    alert:     { svgIcon: SVG_ICONS.alertTriangle, label: '\uC774\uC0C1 \uAC10\uC9C0', color: '#ef4444' },
+    movement:  { svgIcon: SVG_ICONS.arrowsHorizontal, label: '\uD65C\uB3D9 \uAC10\uC9C0', color: '#3b82f6' },
+  };
+
+  // ---- Presence state metadata ----
+  const PRESENCE_META = {
+    absent:        { label: '\uBD80\uC7AC', color: '#64748b', bgColor: 'rgba(100,116,139,0.12)', borderColor: 'rgba(100,116,139,0.3)', neon: false, pulse: false },
+    present_still: { label: '\uC815\uC9C0 \uAC10\uC9C0', color: '#00ff88', bgColor: 'rgba(0,255,136,0.12)', borderColor: 'rgba(0,255,136,0.3)', neon: true, pulse: false },
+    active:        { label: '\uD65C\uB3D9 \uAC10\uC9C0', color: '#00ff88', bgColor: 'rgba(0,255,136,0.18)', borderColor: 'rgba(0,255,136,0.5)', neon: true, pulse: true },
+  };
+
+  // ---- Accuracy level helper ----
+  function getAccuracyLabel(level) {
+    switch(level) {
+      case 'none': return '\uBBF8\uC791\uB3D9';
+      case 'presence': return '\uC874\uC7AC \uAC10\uC9C0';
+      case 'direction': return '\uBC29\uD5A5 \uCD94\uC815';
+      case 'approximate': return '\uADFC\uC0AC \uC704\uCE58';
+      case 'precise': return '\uC815\uBC00 \uC704\uCE58';
+      default: return '--';
+    }
+  }
+
+  // ---- Relative time helper ----
+  function relativeTime(ts) {
+    if (!ts) return '\uC544\uC9C1 \uD65C\uB3D9 \uC5C6\uC74C';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '--';
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diffSec < 5) return '\uBC29\uAE08 \uC804';
+    if (diffSec < 60) return diffSec + '\uCD08 \uC804';
+    if (diffSec < 3600) return Math.floor(diffSec / 60) + '\uBD84 \uC804';
+    return Math.floor(diffSec / 3600) + '\uC2DC\uAC04 \uC804';
+  }
+
+  function formatTime(date) {
+    if (!date) return '--:--:--';
+    const d = date instanceof Date ? date : new Date(date);
+    if (isNaN(d.getTime())) return '--:--:--';
+    return String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+  }
+
+  // ================================================================
+  // STAT CARD COMPONENT
+  // ================================================================
+  function StatCard({ icon, label, value, unit, neon, progress, progressColor, children }) {
+    return React.createElement(Card, {
+      sx: {
+        mb: 1.5,
+        backgroundColor: '#111827',
+        transition: 'border-color 0.3s',
+        '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
+      }
+    },
+      React.createElement(CardContent, { sx: { py: 1.5, px: 2, '&:last-child': { pb: 1.5 } } },
+        React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1.5 },
+          React.createElement(Box, {
+            sx: {
+              fontSize: '1.3rem',
+              width: 36, height: 36,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(0,255,136,0.08)',
+              flexShrink: 0,
+            }
+          }, icon),
+          React.createElement(Box, { sx: { flex: 1, minWidth: 0 } },
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { color: '#94a3b8', fontSize: '0.7rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }
+            }, label),
+            React.createElement(Stack, { direction: 'row', alignItems: 'baseline', spacing: 0.5 },
+              React.createElement(Typography, {
+                variant: 'h5',
+                className: neon ? 'neon-green' : '',
+                sx: {
+                  fontWeight: 800,
+                  fontSize: '1.35rem',
+                  lineHeight: 1.2,
+                  color: neon ? '#00ff88' : '#e2e8f0',
+                  animation: neon ? 'neonTextPulse 3s ease-in-out infinite' : 'none',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }
+              }, value),
+              unit ? React.createElement(Typography, {
+                variant: 'caption',
+                sx: { color: '#64748b', fontWeight: 500, ml: 0.3 }
+              }, unit) : null
+            ),
+            progress != null ? React.createElement(LinearProgress, {
+              variant: 'determinate',
+              value: Math.min(100, Math.max(0, progress)),
+              sx: {
+                mt: 0.7,
+                '& .MuiLinearProgress-bar': {
+                  backgroundColor: progressColor || '#00ff88',
+                  boxShadow: '0 0 6px ' + (progressColor || '#00ff88'),
+                }
+              }
+            }) : null,
+            children || null
+          )
+        )
+      )
+    );
+  }
+
+  // ================================================================
+  // PRESENCE BADGE COMPONENT
+  // ================================================================
+  function PresenceBadge({ state }) {
+    const meta = PRESENCE_META[state] || PRESENCE_META.absent;
+    return React.createElement(Card, {
+      sx: {
+        mb: 1.5,
+        backgroundColor: '#111827',
+        borderColor: meta.borderColor,
+        boxShadow: meta.neon ? '0 0 12px rgba(0,255,136,0.15), 0 0 24px rgba(0,255,136,0.05)' : 'none',
+        animation: meta.pulse ? 'neonPulse 2s ease-in-out infinite' : 'none',
+        transition: 'all 0.4s ease',
+      }
+    },
+      React.createElement(CardContent, { sx: { py: 2, px: 2, '&:last-child': { pb: 2 } } },
+        React.createElement(Typography, {
+          variant: 'caption',
+          sx: { color: '#94a3b8', fontSize: '0.7rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', mb: 0.5, display: 'block' }
+        }, '\uAC10\uC9C0 \uC0C1\uD0DC'),
+        React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1.5 },
+          React.createElement(Box, {
+            sx: {
+              width: 14, height: 14, borderRadius: '50%',
+              backgroundColor: meta.color,
+              boxShadow: meta.neon ? '0 0 8px ' + meta.color + ', 0 0 16px ' + meta.color : 'none',
+              animation: meta.pulse ? 'dotPulse 1.5s ease-in-out infinite' : 'none',
+            }
+          }),
+          React.createElement(Typography, {
+            variant: 'h5',
+            className: meta.neon ? 'neon-green' : '',
+            sx: {
+              fontWeight: 800,
+              fontSize: '1.5rem',
+              lineHeight: 1.2,
+              color: meta.color,
+              animation: meta.pulse ? 'strongNeonPulse 2s ease-in-out infinite' : (meta.neon ? 'neonTextPulse 3s ease-in-out infinite' : 'none'),
+            }
+          }, meta.label)
+        )
+      )
+    );
+  }
+
+  // ================================================================
+  // RSSI SIGNAL BAR COMPONENT
+  // ================================================================
+  function RssiBar({ rssi }) {
+    // Map RSSI to signal strength: -30 = excellent, -90 = terrible
+    const clamped = Math.max(-90, Math.min(-20, rssi || -90));
+    const pct = ((clamped + 90) / 70) * 100;
+    const barColor = pct >= 70 ? '#00ff88' : pct >= 40 ? '#fbbf24' : '#ef4444';
+    return React.createElement(Box, { sx: { mt: 0.5 } },
+      React.createElement(LinearProgress, {
+        variant: 'determinate',
+        value: Math.min(100, Math.max(0, pct)),
+        sx: {
+          height: 6,
+          borderRadius: 3,
+          '& .MuiLinearProgress-bar': {
+            backgroundColor: barColor,
+            boxShadow: '0 0 6px ' + barColor,
+          }
+        }
+      })
+    );
+  }
+
+  // ================================================================
+  // EVENT ITEM COMPONENT
+  // ================================================================
+  function EventItem({ event }) {
+    const meta = EVENT_META[event.type] || EVENT_META.motion;
+    const ts = formatTime(event.ts || new Date());
+    return React.createElement(ListItem, {
+      dense: true,
+      disablePadding: true,
+      sx: {
+        py: 0.5, px: 1,
+        animation: 'eventEnter 0.3s ease',
+        borderBottom: '1px solid rgba(255,255,255,0.03)',
+      }
+    },
+      React.createElement(ListItemIcon, { sx: { minWidth: 28 } },
+        React.createElement(Box, {
+          sx: {
+            width: 8, height: 8, borderRadius: '50%',
+            backgroundColor: meta.color,
+            boxShadow: '0 0 4px ' + meta.color,
+            animation: event.type === 'enter' ? 'dotPulse 1.5s ease-in-out 3' : 'none',
+          }
+        })
+      ),
+      React.createElement(ListItemText, {
+        primary: React.createElement(Stack, { direction: 'row', spacing: 0.5, alignItems: 'center' },
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: meta.color, fontWeight: 600, fontSize: '0.65rem' }
+          }, React.createElement(React.Fragment, null, svgIcon(meta.svgIcon, 14), ' ' + meta.label)),
+          event.confidence != null ? React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#94a3b8', fontSize: '0.6rem' }
+          }, Math.round(event.confidence * 100) + '%') : null
+        ),
+        secondary: React.createElement(Stack, { direction: 'row', justifyContent: 'space-between' },
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontSize: '0.6rem', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+          }, event.detail || event.message || ''),
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#475569', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace' }
+          }, ts)
+        )
+      })
+    );
+  }
+
+  // ================================================================
+  // NODE ITEM COMPONENT
+  // ================================================================
+  function NodeItem({ node, status }) {
+    const isConnected = status === 'connected';
+    const isAP = node.type === 'wifi-router' || node._nodeType === 'ap';
+    return React.createElement(ListItem, {
+      dense: true,
+      disablePadding: true,
+      sx: { py: 0.5, px: 1 }
+    },
+      React.createElement(ListItemIcon, { sx: { minWidth: 32 } },
+        React.createElement(Avatar, {
+          sx: {
+            width: 26, height: 26, fontSize: '0.7rem',
+            backgroundColor: isConnected ? 'rgba(0,255,136,0.12)' : 'rgba(255,255,255,0.06)',
+            color: isConnected ? '#00ff88' : '#64748b',
+          }
+        }, svgIcon(isAP ? SVG_ICONS.wifi : SVG_ICONS.antenna, 14))
+      ),
+      React.createElement(ListItemText, {
+        primary: React.createElement(Typography, {
+          variant: 'caption',
+          sx: { fontWeight: 600, fontSize: '0.7rem', color: '#e2e8f0' }
+        }, node.name),
+        secondary: React.createElement(Typography, {
+          variant: 'caption',
+          sx: { fontSize: '0.6rem', color: '#64748b' }
+        }, (node.type || node._nodeType) + ' (' + node.x + ', ' + node.y + ')')
+      }),
+      React.createElement(Box, {
+        sx: {
+          width: 8, height: 8, borderRadius: '50%',
+          backgroundColor: isConnected ? '#00ff88' : '#64748b',
+          boxShadow: isConnected ? '0 0 6px #00ff88' : 'none',
+        }
+      })
+    );
+  }
+
+  // ================================================================
+  // SPECTRAL ANALYSIS CARD COMPONENT
+  // ================================================================
+  function SpectralCard({ breathingPower, motionPower, dominantFreq }) {
+    const breathingDetected = (breathingPower || 0) > 0.02;
+    const motionDetected = (motionPower || 0) > 0.05;
+    return React.createElement(Card, {
+      sx: {
+        mb: 1,
+        backgroundColor: '#111827',
+        transition: 'border-color 0.3s',
+        '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
+      }
+    },
+      React.createElement(CardContent, { sx: { py: 1.2, px: 1.5, '&:last-child': { pb: 1.2 } } },
+        React.createElement(Typography, {
+          variant: 'caption',
+          sx: { color: '#94a3b8', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', mb: 1, display: 'block' }
+        }, '\uC2A4\uD399\uD2B8\uB7FC \uBD84\uC11D'),
+
+        // Breathing band
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mb: 0.8 } },
+          React.createElement(Box, null,
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { color: '#e2e8f0', fontSize: '0.7rem', fontWeight: 500 }
+            }, '\uD638\uD761 \uB300\uC5ED (0.1-0.5 Hz)'),
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { color: '#14b8a6', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+            }, (breathingPower || 0).toFixed(3))
+          ),
+          React.createElement(Chip, {
+            label: breathingDetected ? '\uAC10\uC9C0\uB428' : '\uBBF8\uAC10\uC9C0',
+            size: 'small',
+            sx: {
+              fontSize: '0.55rem',
+              height: 20,
+              fontWeight: 600,
+              backgroundColor: breathingDetected ? 'rgba(20,184,166,0.12)' : 'rgba(255,255,255,0.06)',
+              color: breathingDetected ? '#14b8a6' : '#64748b',
+              border: '1px solid ' + (breathingDetected ? 'rgba(20,184,166,0.3)' : 'rgba(255,255,255,0.06)'),
+            }
+          })
+        ),
+
+        // Motion band
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mb: 0.8 } },
+          React.createElement(Box, null,
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { color: '#e2e8f0', fontSize: '0.7rem', fontWeight: 500 }
+            }, '\uBAA8\uC158 \uB300\uC5ED (0.5-3.0 Hz)'),
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { color: '#3b82f6', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+            }, (motionPower || 0).toFixed(3))
+          ),
+          React.createElement(Chip, {
+            label: motionDetected ? '\uAC10\uC9C0\uB428' : '\uBBF8\uAC10\uC9C0',
+            size: 'small',
+            sx: {
+              fontSize: '0.55rem',
+              height: 20,
+              fontWeight: 600,
+              backgroundColor: motionDetected ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.06)',
+              color: motionDetected ? '#3b82f6' : '#64748b',
+              border: '1px solid ' + (motionDetected ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.06)'),
+            }
+          })
+        ),
+
+        React.createElement(Divider, { sx: { my: 0.5, borderColor: 'rgba(255,255,255,0.04)' } }),
+
+        // Dominant frequency
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mt: 0.5 } },
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#94a3b8', fontSize: '0.65rem' }
+          }, '\uC8FC \uC8FC\uD30C\uC218'),
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+          }, (dominantFreq || 0).toFixed(2) + ' Hz')
+        )
+      )
+    );
+  }
+
+  // ================================================================
+  // DETECTION PARAMETERS CARD COMPONENT
+  // ================================================================
+  function DetectionParamsCard({ config }) {
+    const detection = config && config.detection ? config.detection : {};
+    return React.createElement(Card, {
+      sx: {
+        mb: 1,
+        backgroundColor: '#111827',
+        transition: 'border-color 0.3s',
+        '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
+      }
+    },
+      React.createElement(CardContent, { sx: { py: 1.2, px: 1.5, '&:last-child': { pb: 1.2 } } },
+        React.createElement(Typography, {
+          variant: 'caption',
+          sx: { color: '#94a3b8', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', mb: 1, display: 'block' }
+        }, '\uAC10\uC9C0 \uD30C\uB77C\uBBF8\uD130'),
+
+        // Variance threshold
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', sx: { mb: 0.5 } },
+          React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Variance Threshold'),
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+          }, (detection.presenceVarianceThreshold || 0.5) + ' dBm\u00B2')
+        ),
+
+        // Smoothing factor
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', sx: { mb: 0.5 } },
+          React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Smoothing Factor'),
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+          }, String(detection.smoothingFactor || 0.85))
+        ),
+
+        // Window size
+        React.createElement(Stack, { direction: 'row', justifyContent: 'space-between' },
+          React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Window Size'),
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+          }, (detection.windowSeconds || 15) + 's')
+        )
+      )
+    );
+  }
+
+  // ================================================================
+  // MAIN DASHBOARD COMPONENT
+  // ================================================================
+  function Dashboard() {
+    // ---- State ----
+    const [config, setConfig] = useState(null);
+    const [clock, setClock] = useState('--:--:--');
+    const [uptime, setUptime] = useState('0:00:00');
+    const [mode, setMode] = useState('simulation');
+    const [connected, setConnected] = useState(false);
+    const [healthStatus, setHealthStatus] = useState({ status: 'degraded', message: '' });
+    const [personCount, setPersonCount] = useState(0);
+    const [maxPersons, setMaxPersons] = useState(5);
+    const [confidence, setConfidence] = useState(0);
+    const [presenceState, setPresenceState] = useState('absent');
+    const [rssiValue, setRssiValue] = useState(-90);
+    const [varianceValue, setVarianceValue] = useState(0);
+    const [snrValue, setSnrValue] = useState(0);
+    const [spectralData, setSpectralData] = useState({ breathingPower: 0, motionPower: 0, dominantFreq: 0 });
+    const [nodeStatuses, setNodeStatuses] = useState({});
+    const [events, setEvents] = useState([]);
+    const [diagMotion, setDiagMotion] = useState('0.00');
+    const [diagSignal, setDiagSignal] = useState('-- dBm');
+    const [processingTime, setProcessingTime] = useState('-- ms');
+    const [serverOnline, setServerOnline] = useState(false);
+    const [trackedDevices, setTrackedDevices] = useState([]);
+    const [accuracyLevel, setAccuracyLevel] = useState('none');
+
+    // Refs for canvases
+    const floorplanContainerRef = useRef(null);
+    const motionCanvasRef = useRef(null);
+    const signalCanvasRef = useRef(null);
+    const startTimeRef = useRef(Date.now());
+    const eventIdRef = useRef(0);
+
+    // ---- Clock + Uptime ----
+    useEffect(() => {
+      const interval = setInterval(() => {
+        const now = new Date();
+        setClock(
+          String(now.getHours()).padStart(2, '0') + ':' +
+          String(now.getMinutes()).padStart(2, '0') + ':' +
+          String(now.getSeconds()).padStart(2, '0')
+        );
+
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        const h = Math.floor(elapsed / 3600);
+        const m = Math.floor((elapsed % 3600) / 60);
+        const s = elapsed % 60;
+        setUptime(h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0'));
+      }, 1000);
+      return () => clearInterval(interval);
+    }, []);
+
+    // ---- Create canvas elements after mount ----
+    useEffect(() => {
+      // Floorplan canvas (used by SignalMeshRenderer)
+      if (floorplanContainerRef.current && !document.getElementById('floorplan-canvas')) {
+        const c = document.createElement('canvas');
+        c.id = 'floorplan-canvas';
+        c.width = 800;
+        c.height = 600;
+        c.style.width = '100%';
+        c.style.height = '100%';
+        c.style.display = 'block';
+        floorplanContainerRef.current.appendChild(c);
+      }
+
+      // RSSI trend canvas
+      if (motionCanvasRef.current && !document.getElementById('motion-trend-canvas')) {
+        const c = document.createElement('canvas');
+        c.id = 'motion-trend-canvas';
+        c.width = 200;
+        c.height = 60;
+        c.style.width = '100%';
+        c.style.height = '60px';
+        c.style.display = 'block';
+        motionCanvasRef.current.appendChild(c);
+      }
+
+      // Variance trend canvas
+      if (signalCanvasRef.current && !document.getElementById('signal-trend-canvas')) {
+        const c = document.createElement('canvas');
+        c.id = 'signal-trend-canvas';
+        c.width = 200;
+        c.height = 60;
+        c.style.width = '100%';
+        c.style.height = '60px';
+        c.style.display = 'block';
+        signalCanvasRef.current.appendChild(c);
+      }
+    }, []);
+
+    // ---- Load signal-map config ----
+    useEffect(() => {
+      fetch('location/config/default-signal-map.json')
+        .then(res => res.json())
+        .then(cfg => {
+          setConfig(cfg);
+          window.__ruviewConfig = cfg;
+          window.dispatchEvent(new CustomEvent('ruview:config-loaded', { detail: cfg }));
+        })
+        .catch(err => {
+          console.warn('[PM] Failed to load signal-map config:', err);
+        });
+    }, []);
+
+    // ---- Expose RuViewDashboard API ----
+    useEffect(() => {
+      window.RuViewDashboard = {
+        maxEvents: 50,
+
+        pushEvent: function(evt) {
+          eventIdRef.current += 1;
+          const now = new Date();
+          const rawDetail = evt.message || evt.detail || evt.type || '';
+          const safeDetail = (rawDetail != null && typeof rawDetail === 'object')
+            ? JSON.stringify(rawDetail)
+            : String(rawDetail);
+          const newEvent = {
+            _id: eventIdRef.current,
+            type: evt.type || 'motion',
+            message: safeDetail,
+            detail: safeDetail,
+            confidence: evt.confidence != null ? evt.confidence : null,
+            ts: now,
+          };
+          setEvents(prev => {
+            const next = [newEvent, ...prev];
+            if (next.length > 50) next.length = 50;
+            return next;
+          });
+        },
+
+        setPersonCount: function(count, max) {
+          setPersonCount(count);
+          if (max != null) setMaxPersons(max);
+        },
+
+        setConfidence: function(pct) {
+          setConfidence(Math.max(0, Math.min(100, pct)));
+
+          // Also update processing time from app state
+          if (window.app && window.app.state) {
+            setProcessingTime(Math.round(window.app.state.diagnostics.processingTimeMs || 0) + ' ms');
+          }
+        },
+
+        setPresenceState: function(state) {
+          // 'absent' | 'present_still' | 'active'
+          if (PRESENCE_META[state]) {
+            setPresenceState(state);
+          }
+        },
+
+        setRssiValue: function(rssi) {
+          setRssiValue(rssi);
+          setDiagSignal(rssi + ' dBm');
+        },
+
+        setVariance: function(variance) {
+          setVarianceValue(variance);
+          setDiagMotion(variance.toFixed(2));
+        },
+
+        setSnr: function(snr) {
+          setSnrValue(snr);
+        },
+
+        setSpectral: function(breathing, motion, dominantFreq) {
+          setSpectralData({
+            breathingPower: breathing || 0,
+            motionPower: motion || 0,
+            dominantFreq: dominantFreq || 0,
+          });
+        },
+
+        setNodeStatus: function(nodeId, status) {
+          setNodeStatuses(prev => ({ ...prev, [nodeId]: status }));
+        },
+
+        setConnectionStatus: function(connected) {
+          setConnected(connected);
+          setServerOnline(connected);
+        },
+
+        setHealthStatus: function(status, message) {
+          setHealthStatus({ status, message: message || '' });
+        },
+
+        setDiagValue: function(type, value) {
+          if (type === 'motion') setDiagMotion(value);
+          else if (type === 'signal') setDiagSignal(value);
+        },
+
+        setTrackedDevices: function(devices) {
+          var arr = Array.isArray(devices) ? devices : (devices && typeof devices === 'object' ? Object.values(devices) : []);
+          setTrackedDevices(arr);
+        },
+
+        setAccuracy: function(level) {
+          setAccuracyLevel(level);
+        },
+      };
+
+      return () => { delete window.RuViewDashboard; };
+    }, []);
+
+    // ---- Mode switch handler ----
+    const handleModeChange = useCallback((newMode) => {
+      setMode(newMode);
+      window.dispatchEvent(new CustomEvent('ruview:mode-change', { detail: { mode: newMode } }));
+    }, []);
+
+    // ---- Derived values ----
+    const allNodes = useMemo(() => {
+      if (!config) return [];
+      const aps = (config.accessPoints || []).map(ap => ({ ...ap, _nodeType: 'ap' }));
+      const nodes = (config.nodes || []).map(n => ({ ...n, _nodeType: 'esp32' }));
+      return [...aps, ...nodes];
+    }, [config]);
+
+    // ---- Mode labels ----
+    const getModeLabel = (m) => {
+      switch (m) {
+        case 'simulation': return 'Simulation';
+        case 'rssi-only': return 'RSSI Only';
+        case 'rssi+csi': return 'RSSI + CSI';
+        default: return m;
+      }
+    };
+
+    const getSourceLabel = (m) => {
+      switch (m) {
+        case 'simulation': return 'Simulation';
+        case 'rssi-only': return 'WiFi RSSI';
+        case 'rssi+csi': return 'ESP32 CSI';
+        default: return 'Simulation';
+      }
+    };
+
+    // ================================================================
+    // RENDER
+    // ================================================================
+    return React.createElement(ThemeProvider, { theme: darkTheme },
+      React.createElement(CssBaseline),
+      React.createElement(Box, {
+        sx: {
+          display: 'grid',
+          gridTemplateAreas: {
+            xs: '"header" "sidebar" "canvas" "detail" "footer"',
+            md: '"header header header" "sidebar canvas detail" "footer footer footer"',
+          },
+          gridTemplateRows: { xs: 'auto auto 1fr auto auto', md: 'auto 1fr auto' },
+          gridTemplateColumns: { xs: '1fr', md: '280px 1fr 320px', lg: '280px 1fr 340px' },
+          height: '100vh',
+          backgroundColor: '#0a0f1a',
+        }
+      },
+
+        // ============================================================
+        // HEADER (AppBar)
+        // ============================================================
+        React.createElement(AppBar, {
+          position: 'static',
+          elevation: 0,
+          sx: {
+            gridArea: 'header',
+            backgroundColor: 'rgba(17,24,39,0.9)',
+            backdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }
+        },
+          React.createElement(Toolbar, { variant: 'dense', sx: { justifyContent: 'space-between', px: 2, minHeight: '52px !important' } },
+            // Left: brand + mode chips
+            React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 2 },
+              // Brand
+              React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1 },
+                React.createElement(Box, {
+                  sx: {
+                    width: 32, height: 32,
+                    background: 'linear-gradient(135deg, #00ff88, #00c853)',
+                    borderRadius: '8px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 2px 8px rgba(0,255,136,0.3)',
+                    fontSize: '1rem', fontWeight: 800, color: '#0a0f1a',
+                  }
+                }, 'P'),
+                React.createElement(Typography, {
+                  variant: 'subtitle1',
+                  sx: { fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em' }
+                }, 'PM'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  sx: { color: '#64748b', fontWeight: 500, ml: -0.5 }
+                }, 'Location')
+              ),
+
+              React.createElement(Divider, { orientation: 'vertical', flexItem: true, sx: { borderColor: 'rgba(255,255,255,0.08)', mx: 1 } }),
+
+              // Mode chips
+              React.createElement(Stack, { direction: 'row', spacing: 0.5 },
+                ['simulation', 'rssi-only', 'rssi+csi'].map(m =>
+                  React.createElement(Chip, {
+                    key: m,
+                    label: m === 'simulation' ? 'Simulation' : m === 'rssi-only' ? 'RSSI Only' : 'RSSI + CSI',
+                    size: 'small',
+                    onClick: () => handleModeChange(m),
+                    variant: mode === m ? 'filled' : 'outlined',
+                    sx: {
+                      fontSize: '0.65rem',
+                      height: 26,
+                      color: mode === m ? '#0a0f1a' : '#94a3b8',
+                      backgroundColor: mode === m ?
+                        (m === 'simulation' ? '#fbbf24' : m === 'rssi-only' ? '#3b82f6' : '#00ff88') :
+                        'transparent',
+                      borderColor: mode === m ? 'transparent' : 'rgba(255,255,255,0.1)',
+                      fontWeight: mode === m ? 700 : 500,
+                      '&:hover': {
+                        backgroundColor: mode === m ?
+                          (m === 'simulation' ? '#f59e0b' : m === 'rssi-only' ? '#2563eb' : '#00e676') :
+                          'rgba(255,255,255,0.06)',
+                      }
+                    }
+                  })
+                )
+              )
+            ),
+
+            // Right: status indicators + clock
+            React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1.5 },
+              // Source badge
+              React.createElement(Chip, {
+                label: getModeLabel(mode),
+                size: 'small',
+                id: 'source-badge',
+                sx: {
+                  fontSize: '0.6rem',
+                  height: 22,
+                  backgroundColor: mode === 'simulation' ? 'rgba(251,191,36,0.12)' :
+                    mode === 'rssi-only' ? 'rgba(59,130,246,0.12)' : 'rgba(0,255,136,0.12)',
+                  color: mode === 'simulation' ? '#fbbf24' :
+                    mode === 'rssi-only' ? '#3b82f6' : '#00ff88',
+                  border: '1px solid ' + (mode === 'simulation' ? 'rgba(251,191,36,0.2)' :
+                    mode === 'rssi-only' ? 'rgba(59,130,246,0.2)' : 'rgba(0,255,136,0.2)'),
+                }
+              }),
+
+              // Connection indicator
+              React.createElement(Tooltip, { title: connected ? '\uC5F0\uACB0\uB428' : '\uC5F0\uACB0 \uC548\uB428' },
+                React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 0.5, id: 'connection-badge' },
+                  React.createElement(Box, {
+                    sx: {
+                      width: 7, height: 7, borderRadius: '50%',
+                      backgroundColor: connected ? '#00ff88' : '#ef4444',
+                      boxShadow: connected ? '0 0 6px #00ff88' : '0 0 6px #ef4444',
+                      animation: connected ? 'dotPulse 2s ease-in-out infinite' : 'none',
+                    }
+                  }),
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    id: 'connection-label',
+                    sx: { color: connected ? '#00ff88' : '#ef4444', fontSize: '0.65rem', fontWeight: 600 }
+                  }, connected ? '\uC5F0\uACB0\uB428' : '\uC5F0\uACB0 \uC548\uB428')
+                )
+              ),
+
+              // Health badge
+              React.createElement(Chip, {
+                id: 'health-badge',
+                label: React.createElement('span', { id: 'health-label' },
+                  healthStatus.message || (healthStatus.status === 'healthy' ? 'System OK' : 'Degraded')
+                ),
+                size: 'small',
+                sx: {
+                  fontSize: '0.6rem',
+                  height: 22,
+                  backgroundColor: healthStatus.status === 'healthy' ? 'rgba(0,255,136,0.12)' :
+                    healthStatus.status === 'degraded' ? 'rgba(251,191,36,0.12)' : 'rgba(239,68,68,0.12)',
+                  color: healthStatus.status === 'healthy' ? '#00ff88' :
+                    healthStatus.status === 'degraded' ? '#fbbf24' : '#ef4444',
+                  border: '1px solid ' + (healthStatus.status === 'healthy' ? 'rgba(0,255,136,0.2)' :
+                    healthStatus.status === 'degraded' ? 'rgba(251,191,36,0.2)' : 'rgba(239,68,68,0.2)'),
+                }
+              }),
+
+              // Clock
+              React.createElement(Typography, {
+                variant: 'caption',
+                id: 'clock',
+                sx: {
+                  fontFamily: '"JetBrains Mono", monospace',
+                  color: '#64748b',
+                  fontSize: '0.7rem',
+                  fontWeight: 500,
+                }
+              }, clock)
+            )
+          )
+        ),
+
+        // ============================================================
+        // LEFT SIDEBAR — RSSI Stats + Node List
+        // ============================================================
+        React.createElement(Box, {
+          sx: {
+            gridArea: 'sidebar',
+            minWidth: 0,
+            backgroundColor: 'rgba(17,24,39,0.5)',
+            borderRight: '1px solid rgba(255,255,255,0.04)',
+            overflowY: 'auto',
+            p: 1.5,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 0,
+          }
+        },
+          // Presence state badge (large)
+          React.createElement(PresenceBadge, { state: presenceState }),
+
+          // RSSI value with signal bar
+          React.createElement(Card, {
+            sx: {
+              mb: 1.5,
+              backgroundColor: '#111827',
+              transition: 'border-color 0.3s',
+              '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
+            }
+          },
+            React.createElement(CardContent, { sx: { py: 1.5, px: 2, '&:last-child': { pb: 1.5 } } },
+              React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1.5 },
+                React.createElement(Box, {
+                  sx: {
+                    fontSize: '1.3rem',
+                    width: 36, height: 36,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(0,255,136,0.08)',
+                    flexShrink: 0,
+                  }
+                }, svgIcon(SVG_ICONS.wifi)),
+                React.createElement(Box, { sx: { flex: 1, minWidth: 0 } },
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    sx: { color: '#94a3b8', fontSize: '0.7rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }
+                  }, 'RSSI \uC218\uC900'),
+                  React.createElement(Stack, { direction: 'row', alignItems: 'baseline', spacing: 0.5 },
+                    React.createElement(Typography, {
+                      variant: 'h5',
+                      sx: {
+                        fontWeight: 800,
+                        fontSize: '1.4rem',
+                        lineHeight: 1.2,
+                        color: '#e2e8f0',
+                        fontFamily: '"JetBrains Mono", monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }
+                    }, String(rssiValue)),
+                    React.createElement(Typography, {
+                      variant: 'caption',
+                      sx: { color: '#64748b', fontWeight: 500, ml: 0.3 }
+                    }, 'dBm')
+                  ),
+                  React.createElement(RssiBar, { rssi: rssiValue })
+                )
+              )
+            )
+          ),
+
+          // Variance
+          React.createElement(StatCard, {
+            icon: svgIcon(SVG_ICONS.wave),
+            label: '\uC2E0\uD638 \uBCC0\uB3D9',
+            value: varianceValue.toFixed(1),
+            unit: 'dBm\u00B2',
+            neon: varianceValue >= 0.5,
+          }),
+
+          // Confidence
+          React.createElement(StatCard, {
+            icon: svgIcon(SVG_ICONS.barChart),
+            label: '\uC2E0\uB8B0\uB3C4',
+            value: Math.round(confidence) + '%',
+            progress: confidence,
+            progressColor: confidence >= 70 ? '#00ff88' : confidence >= 40 ? '#fbbf24' : '#ef4444',
+          }),
+
+          // SNR
+          React.createElement(StatCard, {
+            icon: svgIcon(SVG_ICONS.antenna),
+            label: 'SNR',
+            value: snrValue.toFixed(1),
+            unit: 'dB',
+          }),
+
+          // Positioning Accuracy
+          React.createElement(StatCard, {
+            icon: svgIcon(SVG_ICONS.antenna),
+            label: '\uCE21\uC704 \uC815\uD655\uB3C4',
+            value: getAccuracyLabel(accuracyLevel),
+            neon: accuracyLevel === 'precise' || accuracyLevel === 'approximate',
+          }),
+
+          // Uptime
+          React.createElement(StatCard, {
+            icon: svgIcon(SVG_ICONS.clock),
+            label: '\uAC00\uB3D9 \uC2DC\uAC04',
+            value: uptime,
+          }),
+
+          React.createElement(Divider, { sx: { my: 1, borderColor: 'rgba(255,255,255,0.04)' } }),
+
+          // Node list
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, px: 0.5 }
+          }, '\uB178\uB4DC \uC0C1\uD0DC'),
+
+          React.createElement(Paper, {
+            elevation: 0,
+            sx: { backgroundColor: '#111827', borderRadius: '12px', overflow: 'hidden' }
+          },
+            React.createElement(List, { dense: true, disablePadding: true },
+              allNodes.map(node =>
+                React.createElement(NodeItem, {
+                  key: node.id,
+                  node: node,
+                  status: nodeStatuses[node.id] || (node.status === 'connected' ? 'connected' : 'disconnected'),
+                })
+              )
+            )
+          ),
+
+          // Spacer
+          React.createElement(Box, { sx: { flex: 1 } }),
+
+          // Tagline
+          React.createElement(Paper, {
+            elevation: 0,
+            sx: {
+              mt: 1.5, p: 1.5,
+              backgroundColor: 'rgba(0,255,136,0.04)',
+              borderColor: 'rgba(0,255,136,0.1)',
+              textAlign: 'center',
+            }
+          },
+            React.createElement(Typography, {
+              variant: 'caption',
+              sx: { fontSize: '0.7rem', lineHeight: 1.5, color: '#94a3b8' }
+            },
+              React.createElement('span', { style: { color: '#00ff88', fontWeight: 600 } }, '\uCE74\uBA54\uB77C \uC5C6\uC774 WiFi \uC2E0\uD638\uB9CC\uC73C\uB85C'),
+              React.createElement('br'),
+              '\uACF5\uAC04\uC744 \uAC10\uC9C0\uD569\uB2C8\uB2E4'
+            )
+          )
+        ),
+
+        // ============================================================
+        // CENTER — Signal Mesh Canvas
+        // ============================================================
+        React.createElement(Box, {
+          sx: {
+            gridArea: 'canvas',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            position: 'relative',
+          }
+        },
+          // Toolbar above canvas
+          React.createElement(Box, {
+            sx: {
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              px: 2, py: 1,
+              borderBottom: '1px solid rgba(255,255,255,0.04)',
+            }
+          },
+            React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1.5 },
+              React.createElement(Typography, {
+                variant: 'subtitle2',
+                id: 'room-name',
+                sx: { fontWeight: 600, color: '#e2e8f0' }
+              }, 'Signal Mesh'),
+              React.createElement(Chip, {
+                label: config && config.signalMap ? config.signalMap.name : '--',
+                size: 'small',
+                sx: {
+                  fontSize: '0.6rem',
+                  height: 20,
+                  backgroundColor: 'rgba(0,255,136,0.08)',
+                  color: '#00ff88',
+                  border: '1px solid rgba(0,255,136,0.15)',
+                }
+              })
+            ),
+            React.createElement(Typography, {
+              variant: 'caption',
+              id: 'room-dimensions',
+              sx: { color: '#64748b', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem' }
+            }, config && config.signalMap
+              ? 'n=' + (config.signalMap.pathLossExponent || 3.0) + ' | ref=' + (config.signalMap.referenceRssi || -30) + ' dBm'
+              : '-- | --'
+            )
+          ),
+
+          // Canvas container
+          React.createElement(Box, {
+            ref: floorplanContainerRef,
+            sx: {
+              flex: 1,
+              position: 'relative',
+              backgroundColor: '#0a0e18',
+            }
+          }),
+
+          // Simulation notice
+          mode === 'simulation' ? React.createElement(Alert, {
+            severity: 'warning',
+            id: 'sim-notice',
+            sx: {
+              mx: 2, mb: 1,
+              backgroundColor: 'rgba(251,191,36,0.08)',
+              color: '#fbbf24',
+              border: '1px solid rgba(251,191,36,0.15)',
+              fontSize: '0.7rem',
+              py: 0.3,
+              '& .MuiAlert-icon': { color: '#fbbf24', fontSize: '1rem' },
+            }
+          }, '\uC2DC\uBBAC\uB808\uC774\uC158 \uBAA8\uB4DC \u2014 RSSI \uAC12\uC774 \uC2DC\uBBAC\uB808\uC774\uC158\uB429\uB2C8\uB2E4') : null
+        ),
+
+        // ============================================================
+        // RIGHT PANEL — Detection Analysis + Tracked Devices + Event Timeline
+        // ============================================================
+        React.createElement(Box, {
+          sx: {
+            gridArea: 'detail',
+            minWidth: 0,
+            backgroundColor: 'rgba(17,24,39,0.5)',
+            borderLeft: '1px solid rgba(255,255,255,0.04)',
+            overflowY: 'auto',
+            p: 1.5,
+            display: 'flex',
+            flexDirection: 'column',
+          }
+        },
+          // Detection analysis header
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, px: 0.5 }
+          }, '\uAC10\uC9C0 \uBD84\uC11D'),
+
+          // Spectral analysis card
+          React.createElement(SpectralCard, {
+            breathingPower: spectralData.breathingPower,
+            motionPower: spectralData.motionPower,
+            dominantFreq: spectralData.dominantFreq,
+          }),
+
+          // Detection parameters card
+          React.createElement(DetectionParamsCard, { config: config }),
+
+          React.createElement(Divider, { sx: { my: 1, borderColor: 'rgba(255,255,255,0.04)' } }),
+
+          // ---- Tracked Devices Section ----
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, px: 0.5 }
+          }, '\uCD94\uC801 \uB300\uC0C1'),
+
+          trackedDevices.length === 0
+            ? React.createElement(Card, {
+                sx: { mb: 1, backgroundColor: '#111827' }
+              },
+                React.createElement(CardContent, { sx: { py: 1.5, px: 1.5, '&:last-child': { pb: 1.5 } } },
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    sx: { color: '#475569', fontSize: '0.7rem', textAlign: 'center', display: 'block' }
+                  }, '\uCD94\uC801 \uB300\uC0C1 \uC5C6\uC74C')
+                )
+              )
+            : (Array.isArray(trackedDevices) ? trackedDevices : Object.values(trackedDevices || {})).map(function(device) {
+                return React.createElement(Card, {
+                  key: device.id,
+                  sx: {
+                    mb: 1,
+                    backgroundColor: '#111827',
+                    borderLeft: '3px solid ' + (device.color || '#00ff88'),
+                    transition: 'border-color 0.3s',
+                    '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
+                  }
+                },
+                  React.createElement(CardContent, { sx: { py: 1, px: 1.5, '&:last-child': { pb: 1 } } },
+                    React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center' },
+                      React.createElement(Stack, { direction: 'row', alignItems: 'center', spacing: 1 },
+                        React.createElement(Box, {
+                          sx: {
+                            width: 10, height: 10, borderRadius: '50%',
+                            backgroundColor: device.color || '#00ff88',
+                            boxShadow: '0 0 6px ' + (device.color || '#00ff88'),
+                          }
+                        }),
+                        React.createElement(Typography, {
+                          variant: 'caption',
+                          sx: { fontWeight: 600, color: '#e2e8f0', fontSize: '0.75rem' }
+                        }, device.name || device.id)
+                      ),
+                      React.createElement(Chip, {
+                        label: Math.round((device.confidence || 0) * 100) + '%',
+                        size: 'small',
+                        sx: {
+                          fontSize: '0.55rem',
+                          height: 18,
+                          backgroundColor: 'rgba(0,255,136,0.12)',
+                          color: '#00ff88',
+                        }
+                      })
+                    ),
+                    // Position
+                    React.createElement(Typography, {
+                      variant: 'caption',
+                      sx: {
+                        color: '#64748b',
+                        fontSize: '0.6rem',
+                        fontFamily: '"JetBrains Mono", monospace',
+                        mt: 0.5,
+                        display: 'block',
+                      }
+                    }, 'x: ' + (device.position ? device.position.x.toFixed(1) : '--') +
+                       '  y: ' + (device.position ? device.position.y.toFixed(1) : '--') +
+                       '  \u00B1' + (device.errorRadius ? device.errorRadius.toFixed(1) : '--') + 'm')
+                  )
+                );
+              }),
+
+          React.createElement(Divider, { sx: { my: 1, borderColor: 'rgba(255,255,255,0.04)' } }),
+
+          // Event timeline header
+          React.createElement(Typography, {
+            variant: 'caption',
+            sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.08em', mb: 0.5, px: 0.5 }
+          }, '\uC774\uBCA4\uD2B8 \uD0C0\uC784\uB77C\uC778'),
+
+          // Event timeline
+          React.createElement(Paper, {
+            elevation: 0,
+            id: 'event-timeline',
+            sx: {
+              flex: 1,
+              minHeight: 120,
+              maxHeight: 300,
+              overflowY: 'auto',
+              backgroundColor: '#111827',
+              borderRadius: '12px',
+            }
+          },
+            events.length === 0
+              ? React.createElement(Box, {
+                  sx: {
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    py: 3,
+                    color: '#475569',
+                  }
+                },
+                  React.createElement(Typography, { variant: 'caption', sx: { fontSize: '0.7rem' } },
+                    '\uC774\uBCA4\uD2B8 \uB300\uAE30 \uC911...'
+                  )
+                )
+              : React.createElement(List, { dense: true, disablePadding: true },
+                  events.slice(0, 20).map(evt =>
+                    React.createElement(EventItem, { key: evt._id, event: evt })
+                  )
+                )
+          )
+        ),
+
+        // ============================================================
+        // FOOTER — Diagnostics
+        // ============================================================
+        React.createElement(Box, {
+          id: 'diagnostics-panel',
+          sx: {
+            gridArea: 'footer',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: 1,
+            p: 1,
+            borderTop: '1px solid rgba(255,255,255,0.04)',
+            backgroundColor: 'rgba(17,24,39,0.6)',
+          }
+        },
+          // RSSI Trend
+          React.createElement(Card, {
+            elevation: 0,
+            sx: { backgroundColor: '#111827' }
+          },
+            React.createElement(CardContent, { sx: { py: 1, px: 1.5, '&:last-child': { pb: 1 } } },
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mb: 0.5 } },
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem' }
+                }, 'RSSI Trend'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  id: 'motion-trend-value',
+                  sx: { color: '#3b82f6', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600 }
+                }, diagSignal)
+              ),
+              React.createElement(Box, {
+                ref: motionCanvasRef,
+                className: 'diag-canvas-wrap',
+                sx: { borderRadius: '8px', overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.2)' }
+              })
+            )
+          ),
+
+          // Variance Trend
+          React.createElement(Card, {
+            elevation: 0,
+            sx: { backgroundColor: '#111827' }
+          },
+            React.createElement(CardContent, { sx: { py: 1, px: 1.5, '&:last-child': { pb: 1 } } },
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mb: 0.5 } },
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem' }
+                }, 'Variance Trend'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  id: 'signal-trend-value',
+                  sx: { color: '#FF9800', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.7rem', fontWeight: 600 }
+                }, diagMotion + ' dBm\u00B2')
+              ),
+              React.createElement(Box, {
+                ref: signalCanvasRef,
+                className: 'diag-canvas-wrap',
+                sx: { borderRadius: '8px', overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.2)' }
+              })
+            )
+          ),
+
+          // System status
+          React.createElement(Card, {
+            elevation: 0,
+            sx: { backgroundColor: '#111827' }
+          },
+            React.createElement(CardContent, { sx: { py: 1, px: 1.5, '&:last-child': { pb: 1 } } },
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', alignItems: 'center', sx: { mb: 0.8 } },
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  sx: { color: '#64748b', fontWeight: 600, fontSize: '0.65rem' }
+                }, 'System'),
+                React.createElement(Chip, {
+                  id: 'system-status-label',
+                  label: serverOnline ? '\uC815\uC0C1' : '\uC624\uD504\uB77C\uC778',
+                  size: 'small',
+                  sx: {
+                    fontSize: '0.55rem',
+                    height: 18,
+                    fontWeight: 600,
+                    backgroundColor: serverOnline ? 'rgba(0,255,136,0.12)' : 'rgba(239,68,68,0.12)',
+                    color: serverOnline ? '#00ff88' : '#ef4444',
+                  }
+                })
+              ),
+              // Processing time
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', sx: { mb: 0.3 } },
+                React.createElement(Typography, { variant: 'caption', sx: { color: '#64748b', fontSize: '0.6rem' } }, '\uCC98\uB9AC \uC2DC\uAC04'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  id: 'processing-time',
+                  sx: { color: '#e2e8f0', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace' }
+                }, processingTime)
+              ),
+              // Server status
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between', sx: { mb: 0.3 } },
+                React.createElement(Typography, { variant: 'caption', sx: { color: '#64748b', fontSize: '0.6rem' } }, '\uC11C\uBC84 \uC0C1\uD0DC'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  id: 'server-status-text',
+                  sx: {
+                    color: serverOnline ? '#00ff88' : '#ef4444',
+                    fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace', fontWeight: 600,
+                  }
+                }, serverOnline ? '\uC628\uB77C\uC778' : '\uC624\uD504\uB77C\uC778')
+              ),
+              // Data source
+              React.createElement(Stack, { direction: 'row', justifyContent: 'space-between' },
+                React.createElement(Typography, { variant: 'caption', sx: { color: '#64748b', fontSize: '0.6rem' } }, '\uB370\uC774\uD130 \uC18C\uC2A4'),
+                React.createElement(Typography, {
+                  variant: 'caption',
+                  id: 'data-source-text',
+                  sx: { color: '#e2e8f0', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace' }
+                }, getSourceLabel(mode))
+              )
+            )
+          )
+        )
+      )
+    );
+  }
+
+  // ---- Mount React App ----
+  const container = document.getElementById('root');
+  const root = createRoot(container);
+  root.render(React.createElement(Dashboard));
+  </script>
+
+  <!-- Hidden compat elements for app.js that may do getElementById lookups -->
+  <div style="display:none">
+    <div id="status-banner"></div>
+    <span id="active-zones-count"></span>
+    <span id="uptime-value"></span>
+    <span id="confidence-value">0%</span>
+    <div id="confidence-bar" style="width:0%"></div>
+    <span id="person-count">0</span>
+    <span id="source-label"></span>
+  </div>
+
+  <!-- Application scripts — dependency order -->
+  <script src="config/api.config.js"></script>
+  <script src="location/api.js"></script>
+  <script src="location/ws.js"></script>
+  <script src="location/floorplan.js"></script>
+  <script src="location/simulator.js"></script>
+  <script src="location/signal-mesh.js"></script>
+  <script src="location/trilateration.js"></script>
+  <script src="location/app.js"></script>
+
+</body>
+</html>
