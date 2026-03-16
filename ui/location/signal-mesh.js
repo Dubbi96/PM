@@ -1054,7 +1054,7 @@ var SignalMeshRenderer = (function() {
         this._deviceRenderPositions[renderId] = { x: targetX, y: targetY };
       }
       var rp = this._deviceRenderPositions[renderId];
-      var lerpFactor = 0.12;
+      var lerpFactor = 0.07;  // smoother: 7% per frame for natural movement
       rp.x += (targetX - rp.x) * lerpFactor;
       rp.y += (targetY - rp.y) * lerpFactor;
       var px = rp.x;

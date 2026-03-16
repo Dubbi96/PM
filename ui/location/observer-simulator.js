@@ -448,10 +448,14 @@
 
       switch (person.state) {
         case 'idle':
-          // Pick a random target and start walking
-          person.targetX = randRange(boundsMinX + 0.5, boundsMaxX - 0.5);
-          person.targetY = randRange(boundsMinY + 0.5, boundsMaxY - 0.5);
-          person.speed = randRange(0.3, 0.8);
+          // Pick a NEARBY target (max 3m away) for natural short walks
+          var angle = Math.random() * Math.PI * 2;
+          var stepDist = randRange(1.0, 3.0);
+          person.targetX = person.x + Math.cos(angle) * stepDist;
+          person.targetY = person.y + Math.sin(angle) * stepDist;
+          person.targetX = Math.max(boundsMinX + 0.5, Math.min(boundsMaxX - 0.5, person.targetX));
+          person.targetY = Math.max(boundsMinY + 0.5, Math.min(boundsMaxY - 0.5, person.targetY));
+          person.speed = randRange(0.3, 0.5);
           person.state = 'walking';
           break;
 
@@ -460,34 +464,37 @@
           var dy = person.targetY - person.y;
           var d = Math.sqrt(dx * dx + dy * dy);
 
-          if (d < 0.15) {
-            // Arrived at target, pause
+          if (d < 0.1) {
             person.vx = 0;
             person.vy = 0;
             person.state = 'stationary';
-            person.pauseTimer = randRange(3, 10);
+            person.pauseTimer = randRange(4, 12);
           } else {
-            // Move toward target
-            person.vx = (dx / d) * person.speed;
-            person.vy = (dy / d) * person.speed;
+            // Smooth steering — gradually turn toward target
+            var targetVx = (dx / d) * person.speed;
+            var targetVy = (dy / d) * person.speed;
+            person.vx += (targetVx - person.vx) * 0.08;
+            person.vy += (targetVy - person.vy) * 0.08;
 
-            // Slight random drift for natural movement (reduced for smoother paths)
-            person.vx += gaussianRandom() * 0.02;
-            person.vy += gaussianRandom() * 0.02;
+            person.vx += gaussianRandom() * 0.005;
+            person.vy += gaussianRandom() * 0.005;
 
             person.x += person.vx * dt;
             person.y += person.vy * dt;
 
-            // Clamp to bounds
-            person.x = Math.max(boundsMinX, Math.min(boundsMaxX, person.x));
-            person.y = Math.max(boundsMinY, Math.min(boundsMaxY, person.y));
+            // Soft bounds
+            if (person.x < boundsMinX) { person.x = boundsMinX; person.vx = Math.abs(person.vx) * 0.3; }
+            if (person.x > boundsMaxX) { person.x = boundsMaxX; person.vx = -Math.abs(person.vx) * 0.3; }
+            if (person.y < boundsMinY) { person.y = boundsMinY; person.vy = Math.abs(person.vy) * 0.3; }
+            if (person.y > boundsMaxY) { person.y = boundsMaxY; person.vy = -Math.abs(person.vy) * 0.3; }
           }
           break;
 
         case 'stationary':
-          // Very small idle drift (reduced for smoother output)
           person.x += gaussianRandom() * 0.001;
           person.y += gaussianRandom() * 0.001;
+          person.vx *= 0.9;
+          person.vy *= 0.9;
 
           person.pauseTimer -= dt;
           if (person.pauseTimer <= 0) {
