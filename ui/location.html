@@ -14,8 +14,19 @@
   <link rel="preconnect" href="https://esm.sh">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- React + MUI: all loaded from esm.sh with deps pinned via URL params -->
-  <!-- No importmap needed — single self-contained URL per package -->
+  <!-- Import map: React + ReactDOM via esm.sh (single instance for app + MUI) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react/": "https://esm.sh/react@18.2.0/",
+      "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+      "react-dom": "https://esm.sh/react-dom@18.2.0",
+      "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client"
+    }
+  }
+  </script>
 
   <style>
     /* ============================================================
@@ -194,25 +205,20 @@
      RSSI Mesh Detection Model
      ================================================================ */
 
-  // React (resolved via importmap -> single instance)
-  // React + MUI: all loaded from esm.sh with ?no-dts&bundle to avoid
-  // sub-dependency resolution issues (clsx, @mui/utils, etc.)
-  const _v = 'v135';  // esm.sh build version pin (avoids stale cache)
-  const ReactModule = await import('https://esm.sh/v135/react@18.2.0/es2022/react.mjs');
-  const React = ReactModule.default || ReactModule;
-  const { useState, useEffect, useRef, useCallback, useMemo } = React;
+  // React via importmap (single instance — MUI's 'react' imports resolve here too)
+  import React from 'react';
+  import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+  import { createRoot } from 'react-dom/client';
 
-  const { createRoot } = await import('https://esm.sh/v135/react-dom@18.2.0/es2022/client.js');
-
-  // MUI — single pre-built bundle with all deps included
-  const MUI = await import('https://esm.sh/v135/@mui/material@5.15.20/es2022/material.mjs');
+  // MUI — ?external=react,react-dom means MUI does `import from 'react'`
+  // which the importmap resolves to the same esm.sh/react@18.2.0 = single instance
   const {
     ThemeProvider, createTheme, CssBaseline,
     Box, Typography, Paper, Chip, IconButton, LinearProgress,
     Avatar, Badge, Card, CardContent, Grid, Stack, Divider,
     List, ListItem, ListItemIcon, ListItemText,
     AppBar, Toolbar, Tooltip, Alert, Button
-  } = MUI;
+  } = await import('https://esm.sh/@mui/material@5.15.20?external=react,react-dom');
 
   // Expose React globally for signal-mesh.js, app.js, etc.
   window.React = React;
