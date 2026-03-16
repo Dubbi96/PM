@@ -567,16 +567,16 @@ var SignalMeshRenderer = (function() {
     ctx.fillStyle = SM_BG_COLOR;
     ctx.fillRect(0, 0, w, h);
 
-    // Draw layers in order
+    // Draw layers in order — CLEAN view: grid, contours (subtle), nodes, AP, people
     if (this._visualization.showGrid) this._drawGrid();
-    this._drawSignalHeatmap();
+    // _drawSignalHeatmap() — REMOVED (visual noise)
     if (this._visualization.showSignalContours) this._drawSignalContours();
-    if (this._visualization.showFresnelZone) this._drawFresnelZone();
-    this._drawDetectionOverlay();
-    this._drawTrackedDevices();
-    this._drawAccessPoints();
+    // _drawFresnelZone() — REMOVED (overlapping ellipses obscure everything)
+    // _drawDetectionOverlay() — REMOVED (green glow covers the whole area)
     this._drawNodes();
-    this._drawPersonIndicator();
+    this._drawAccessPoints();
+    this._drawTrackedDevices();
+    // _drawPersonIndicator() — REMOVED (redundant with tracked devices)
     this._drawLegend();
     this._drawStatusOverlay();
   };
@@ -655,7 +655,8 @@ var SignalMeshRenderer = (function() {
   /** @private */
   SignalMeshRenderer.prototype._drawSignalContours = function() {
     var ctx = this._ctx;
-    var levels = this._visualization.contourLevels || [-30, -40, -50, -60, -70, -80];
+    // Only draw -40 and -60 dBm contours — minimal reference circles
+    var levels = [-40, -60];
 
     ctx.save();
 
@@ -673,26 +674,24 @@ var SignalMeshRenderer = (function() {
         // Don't draw contours larger than view
         if (radiusPx > this._viewRadius * this._scale * 2) continue;
 
-        // Contour color: fades from bright to dim
-        var alphaFactor = 1.0 - (i / levels.length);
-        var alpha = 0.15 + 0.35 * alphaFactor;
-        var color = smContourColor(level, alpha);
+        // Very subtle contour — alpha 0.06 max
+        var color = smContourColor(level, 0.06);
 
-        // Dashed circle
+        // Thin dashed circle
         ctx.beginPath();
         ctx.arc(apCx, apCy, radiusPx, 0, Math.PI * 2);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 0.5;
         ctx.setLineDash([4, 6]);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Label
-        var labelAngle = -Math.PI * 0.25; // upper-right
+        // Subtle label
+        var labelAngle = -Math.PI * 0.25;
         var labelX = apCx + radiusPx * Math.cos(labelAngle);
         var labelY = apCy + radiusPx * Math.sin(labelAngle);
         ctx.font = SM_TINY_FONT;
-        ctx.fillStyle = smContourColor(level, 0.5 + 0.3 * alphaFactor);
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
         ctx.fillText(level + ' dBm', labelX + 3, labelY - 2);
@@ -1037,10 +1036,7 @@ var SignalMeshRenderer = (function() {
     if (!this._trackedDevices || this._trackedDevices.length === 0) return;
 
     var ctx = this._ctx;
-    var elapsed = (performance.now() - this._startTime) / 1000;
-
-    // Slow, subtle breathing: oscillates between 0.7 and 1.0 over ~4s cycle
-    var breathe = 0.7 + 0.3 * Math.sin(elapsed * 1.5);
+    var PERSON_COLOR = '#ef4444';  // RED — impossible to miss
 
     ctx.save();
 
@@ -1064,182 +1060,28 @@ var SignalMeshRenderer = (function() {
       var px = rp.x;
       var py = rp.y;
 
-      var color = device.color || SM_NEON_GREEN;
-      var rgb = smHexToRgb(color);
-      var errorRadius = device.errorRadius || 1.0;
-      var errorRadiusPx = errorRadius * this._scale;
-
-      // Helper: device color with specified alpha (IIFE to capture rgb values)
-      var deviceColorWithAlpha = (function(r, g, b) {
-        return function(a) {
-          return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
-        };
-      })(rgb.r, rgb.g, rgb.b);
-
-      // --- 1. RSSI lines: dashed lines from device to each connected node ---
-      if (device.rssiByNode) {
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.lineWidth = 0.5;
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-        ctx.font = SM_TINY_FONT;
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-
-        // Check all APs and nodes by id
-        var allEndpoints = [];
-        for (var ai = 0; ai < this._accessPoints.length; ai++) {
-          allEndpoints.push(this._accessPoints[ai]);
-        }
-        for (var ni = 0; ni < this._nodes.length; ni++) {
-          allEndpoints.push(this._nodes[ni]);
-        }
-
-        for (var nodeId in device.rssiByNode) {
-          if (!device.rssiByNode.hasOwnProperty(nodeId)) continue;
-          var rssiVal = device.rssiByNode[nodeId];
-
-          // Find the endpoint by id
-          var endpoint = null;
-          for (var ei = 0; ei < allEndpoints.length; ei++) {
-            if (allEndpoints[ei].id === nodeId) {
-              endpoint = allEndpoints[ei];
-              break;
-            }
-          }
-          if (!endpoint) continue;
-
-          var epC = this._worldToCanvas(endpoint.x, endpoint.y);
-
-          // Draw dashed line
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(epC[0], epC[1]);
-          ctx.stroke();
-
-          // RSSI label at midpoint
-          var midX = (px + epC[0]) / 2;
-          var midY = (py + epC[1]) / 2;
-          var lineAngle = Math.atan2(epC[1] - py, epC[0] - px);
-          var perpX = -Math.sin(lineAngle) * 10;
-          var perpY = Math.cos(lineAngle) * 10;
-          ctx.fillText(Math.round(rssiVal) + ' dBm', midX + perpX, midY + perpY);
-        }
-
-        ctx.setLineDash([]);
-        ctx.restore();
-      }
-
-      // --- 2. Confidence circle — always visible, no animation ---
+      // PERSON DOT — RED, large, always visible
       ctx.save();
+      ctx.shadowColor = PERSON_COLOR;
+      ctx.shadowBlur = 15;
       ctx.beginPath();
-      ctx.arc(px, py, errorRadiusPx, 0, Math.PI * 2);
-      ctx.fillStyle = deviceColorWithAlpha(0.06);
-      ctx.fill();
-      ctx.strokeStyle = deviceColorWithAlpha(0.25);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-
-      // --- 3. Trail: smooth canvas-space trail from lerped positions ---
-      if (!this._deviceTrails[renderId]) {
-        this._deviceTrails[renderId] = [];
-      }
-      var trail = this._deviceTrails[renderId];
-
-      // Add new point only when position has moved enough (throttle)
-      var lastPoint = trail[trail.length - 1];
-      if (!lastPoint || Math.abs(px - lastPoint.x) > 1 || Math.abs(py - lastPoint.y) > 1) {
-        trail.push({ x: px, y: py });
-        if (trail.length > MAX_TRAIL_POINTS) trail.shift();
-      }
-
-      // Draw smooth trail segments with gradient fade
-      if (trail.length >= 2) {
-        ctx.save();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        for (var t = 1; t < trail.length; t++) {
-          var progress = t / trail.length;  // 0 = oldest, 1 = newest
-          var alpha = progress * 0.5;       // fade from 0 to 0.5
-          var width = 1 + progress * 2;     // thin to thick
-
-          ctx.beginPath();
-          ctx.moveTo(trail[t - 1].x, trail[t - 1].y);
-          ctx.lineTo(trail[t].x, trail[t].y);
-          ctx.strokeStyle = deviceColorWithAlpha(alpha.toFixed(2));
-          ctx.lineWidth = width;
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      // --- 4. Position dot — ALWAYS VISIBLE, solid with subtle breathing glow ---
-
-      // Core dot — always fully visible, no blinking
-      ctx.beginPath();
-      ctx.arc(px, py, 7, 0, Math.PI * 2);
-      ctx.fillStyle = deviceColorWithAlpha(0.9);
-      ctx.fill();
-
-      // Subtle outer glow — glow intensity breathes, dot stays solid
-      ctx.save();
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12 * breathe;
-      ctx.beginPath();
-      ctx.arc(px, py, 7, 0, Math.PI * 2);
-      ctx.fillStyle = deviceColorWithAlpha(0.9);
+      ctx.arc(px, py, 10, 0, Math.PI * 2);
+      ctx.fillStyle = PERSON_COLOR;
       ctx.fill();
       ctx.restore();
 
-      // Bright center highlight
+      // White center
       ctx.beginPath();
-      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
       ctx.fill();
 
-      // --- 5. Name label with dark background pill ---
-      var labelText = device.name || device.id;
-      if (labelText) {
-        ctx.save();
-        ctx.font = '11px "Inter", sans-serif';
-        var textWidth = ctx.measureText(labelText).width;
-        var labelX = px;
-        var labelY = py + 16;  // below the dot
-
-        // Dark pill background
-        ctx.fillStyle = 'rgba(10, 15, 26, 0.8)';
-        var pillPadX = 6, pillPadY = 3;
-        var pillW = textWidth + pillPadX * 2;
-        var pillH = 14 + pillPadY * 2;
-        var pillR = 4;
-        ctx.beginPath();
-        // Rounded rect
-        ctx.moveTo(labelX - pillW / 2 + pillR, labelY - pillPadY);
-        ctx.lineTo(labelX + pillW / 2 - pillR, labelY - pillPadY);
-        ctx.quadraticCurveTo(labelX + pillW / 2, labelY - pillPadY, labelX + pillW / 2, labelY - pillPadY + pillR);
-        ctx.lineTo(labelX + pillW / 2, labelY + pillH - pillPadY - pillR);
-        ctx.quadraticCurveTo(labelX + pillW / 2, labelY + pillH - pillPadY, labelX + pillW / 2 - pillR, labelY + pillH - pillPadY);
-        ctx.lineTo(labelX - pillW / 2 + pillR, labelY + pillH - pillPadY);
-        ctx.quadraticCurveTo(labelX - pillW / 2, labelY + pillH - pillPadY, labelX - pillW / 2, labelY + pillH - pillPadY - pillR);
-        ctx.lineTo(labelX - pillW / 2, labelY - pillPadY + pillR);
-        ctx.quadraticCurveTo(labelX - pillW / 2, labelY - pillPadY, labelX - pillW / 2 + pillR, labelY - pillPadY);
-        ctx.fill();
-
-        // Border matching device color
-        ctx.strokeStyle = deviceColorWithAlpha(0.3);
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Text
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(labelText, labelX, labelY + 1);
-        ctx.restore();
-      }
+      // Name label below
+      ctx.font = 'bold 12px "Inter", sans-serif';
+      ctx.fillStyle = PERSON_COLOR;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(device.name || 'Person', px, py + 16);
     }
 
     ctx.restore();
@@ -1252,7 +1094,7 @@ var SignalMeshRenderer = (function() {
   /** @private */
   SignalMeshRenderer.prototype._drawAccessPoints = function() {
     var ctx = this._ctx;
-    var elapsed = (performance.now() - this._startTime) / 1000;
+    var AP_COLOR = '#f59e0b'; // amber/orange — distinct from cyan nodes and red people
 
     for (var a = 0; a < this._accessPoints.length; a++) {
       var ap = this._accessPoints[a];
@@ -1263,59 +1105,45 @@ var SignalMeshRenderer = (function() {
       ctx.save();
       ctx.translate(cx, cy);
 
-      // Animated radiating concentric circles (signal broadcast)
-      var numWaves = 4;
-      for (var w = 0; w < numWaves; w++) {
-        var wavePhase = ((elapsed * 0.8 + w * 0.25) % 1.0);
-        var waveR = 8 + wavePhase * 35;
-        var waveAlpha = (1 - wavePhase) * 0.35;
-
-        ctx.beginPath();
-        ctx.arc(0, 0, waveR, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0,188,212,' + waveAlpha + ')';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-
       // Outer glow
-      ctx.shadowColor = SM_AP_COLOR;
-      ctx.shadowBlur = 12;
+      ctx.shadowColor = AP_COLOR;
+      ctx.shadowBlur = 16;
 
-      // Base filled circle
+      // Base filled circle — LARGER
       ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI * 2);
-      ctx.fillStyle = SM_AP_COLOR;
+      ctx.arc(0, 0, 8, 0, Math.PI * 2);
+      ctx.fillStyle = AP_COLOR;
       ctx.fill();
 
       ctx.shadowBlur = 0;
 
       // Inner bright dot
       ctx.beginPath();
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
       ctx.fill();
 
-      // WiFi arcs
-      ctx.strokeStyle = 'rgba(0,188,212,0.7)';
-      ctx.lineWidth = 1.5;
+      // WiFi arcs — LARGER, more visible
+      ctx.strokeStyle = 'rgba(245,158,11,0.7)';
+      ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       for (var i = 1; i <= 3; i++) {
-        var r = 7 + i * 5;
+        var r = 10 + i * 7;
         ctx.beginPath();
-        ctx.arc(0, -2, r, -Math.PI * 0.7, -Math.PI * 0.3);
-        ctx.globalAlpha = 1 - i * 0.22;
+        ctx.arc(0, -3, r, -Math.PI * 0.7, -Math.PI * 0.3);
+        ctx.globalAlpha = 1 - i * 0.25;
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
 
-      // Label: AP name + channel
-      ctx.font = SM_SMALL_FONT;
-      ctx.fillStyle = 'rgba(0,188,212,0.8)';
+      // Label: AP name + channel — bold and clear
+      ctx.font = 'bold 12px "Inter", sans-serif';
+      ctx.fillStyle = AP_COLOR;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       var label = ap.name || ap.id;
       if (ap.channel) label += ' (CH' + ap.channel + ')';
-      ctx.fillText(label, 0, 28);
+      ctx.fillText(label, 0, 34);
 
       ctx.restore();
     }
@@ -1422,7 +1250,6 @@ var SignalMeshRenderer = (function() {
   /** @private */
   SignalMeshRenderer.prototype._drawNodes = function() {
     var ctx = this._ctx;
-    var connectedCount = 0;
 
     for (var n = 0; n < this._nodes.length; n++) {
       var node = this._nodes[n];
@@ -1430,136 +1257,39 @@ var SignalMeshRenderer = (function() {
       var cx = c[0];
       var cy = c[1];
       var status = node.status || 'disconnected';
-      var isPcMonitor = (node.type === 'pc-monitor');
-      var isConnected = (status === 'connected');
+      var connected = (status === 'connected');
 
-      // Pick color palette based on node type
-      var color;
-      if (isPcMonitor) {
-        color = isConnected ? SM_PC_NODE_COLORS.connected : SM_PC_NODE_COLORS.disconnected;
-      } else {
-        color = SM_NODE_STATUS_COLORS[status] || SM_NODE_STATUS_COLORS.disconnected;
-      }
+      // PC Node — simple, clear
+      var size = 12;
+      var fillColor = connected ? '#06b6d4' : '#4b5563';
+      var strokeColor = connected ? '#22d3ee' : '#6b7280';
+      var labelColor = connected ? '#22d3ee' : '#6b7280';
 
-      if (isConnected) connectedCount++;
-
-      // Dashed line to each AP with RSSI label
-      for (var a = 0; a < this._accessPoints.length; a++) {
-        var ap = this._accessPoints[a];
-        var apC = this._worldToCanvas(ap.x, ap.y);
-        var dist = smDist(ap.x, ap.y, node.x, node.y);
-        var rssi = this._rssiAtDistance(dist);
-
+      // Glow for connected
+      if (connected) {
         ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(apC[0], apC[1]);
-        ctx.lineTo(cx, cy);
-        ctx.strokeStyle = isConnected
-          ? (isPcMonitor ? 'rgba(0,188,212,0.3)' : 'rgba(76,175,80,0.3)')
-          : 'rgba(158,158,158,0.15)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // RSSI value label at midpoint of line
-        var midX = (apC[0] + cx) / 2;
-        var midY = (apC[1] + cy) / 2;
-        ctx.font = SM_TINY_FONT;
-        ctx.fillStyle = isConnected
-          ? (isPcMonitor ? 'rgba(0,188,212,0.6)' : 'rgba(76,175,80,0.6)')
-          : 'rgba(158,158,158,0.4)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-
-        // Offset label slightly perpendicular to the line so it doesn't overlap
-        var lineAngle = Math.atan2(cy - apC[1], cx - apC[0]);
-        var perpX = -Math.sin(lineAngle) * 10;
-        var perpY = Math.cos(lineAngle) * 10;
-        ctx.fillText(Math.round(rssi) + ' dBm', midX + perpX, midY + perpY);
+        ctx.shadowColor = '#06b6d4';
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
         ctx.restore();
       }
 
-      // Draw the appropriate node icon based on type
-      if (isPcMonitor) {
-        this._drawPcMonitorIcon(ctx, cx, cy, color, isConnected);
-      } else {
-        this._drawEsp32Icon(ctx, cx, cy, color, isConnected);
-      }
+      // Filled square
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
 
-      // Label: node name — offset to avoid overlapping with AP label
-      var labelOffsetY = isPcMonitor ? 14 : 10; // PC monitor icon is taller
-      // Check proximity to each AP and push label further if too close
-      var tooCloseToAp = false;
-      for (var la = 0; la < this._accessPoints.length; la++) {
-        var lapC = this._worldToCanvas(this._accessPoints[la].x, this._accessPoints[la].y);
-        if (Math.abs(cx - lapC[0]) < 50 && Math.abs(cy - lapC[1]) < 50) {
-          tooCloseToAp = true;
-          break;
-        }
-      }
-      if (tooCloseToAp) labelOffsetY += 20; // push label further down if near AP
+      // Border
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
 
-      ctx.save();
-      ctx.font = SM_TINY_FONT;
-      ctx.fillStyle = isPcMonitor
-        ? smHexToRgba(color, 0.8)
-        : 'rgba(255,255,255,0.6)';
+      // Label
+      ctx.font = 'bold 11px "Inter", sans-serif';
+      ctx.fillStyle = labelColor;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(node.name || node.id, cx, cy + labelOffsetY);
-
-      // Show node type label for PC monitors
-      if (isPcMonitor) {
-        ctx.fillStyle = smHexToRgba(color, 0.45);
-        ctx.fillText('PC Monitor', cx, cy + labelOffsetY + 11);
-      }
-      ctx.restore();
-    }
-
-    // Trilateration indicator: show when 3+ connected nodes (including APs)
-    var totalConnected = connectedCount + this._accessPoints.length;
-    if (this._nodes.length > 0) {
-      var triActive = totalConnected >= 3;
-      var triColor = triActive ? '#4CAF50' : '#9E9E9E';
-      var triText = triActive ? 'Trilateration: Active' : 'Trilateration: Inactive';
-
-      // Position below the status overlay area (top-left)
-      var badgeX = 12;
-      var badgeY = 120; // Below the status overlay
-
-      ctx.save();
-      ctx.font = SM_TINY_FONT;
-      var triW = ctx.measureText(triText).width + 20;
-      var triH = 18;
-
-      // Badge background
-      ctx.fillStyle = 'rgba(10,14,24,0.8)';
-      ctx.strokeStyle = triColor;
-      ctx.lineWidth = 1;
-      this._roundRect(ctx, badgeX, badgeY, triW, triH, 4);
-      ctx.fill();
-      ctx.stroke();
-
-      // Green dot indicator
-      ctx.beginPath();
-      ctx.arc(badgeX + 9, badgeY + triH / 2, 3, 0, Math.PI * 2);
-      ctx.fillStyle = triColor;
-      ctx.fill();
-      if (triActive) {
-        ctx.shadowColor = triColor;
-        ctx.shadowBlur = 6;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      }
-
-      // Text
-      ctx.fillStyle = triColor;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(triText, badgeX + 16, badgeY + triH / 2);
-
-      ctx.restore();
+      ctx.fillText(node.name || node.id, cx, cy + size / 2 + 6);
     }
   };
 
@@ -1665,27 +1395,12 @@ var SignalMeshRenderer = (function() {
 
     var padX = 12;
     var padY = 8;
-    var lineH = 16;
-    var titleH = 18;
-    var legendW = 170;
+    var lineH = 18;
+    var titleH = 20;
+    var legendW = 180;
 
-    // Check if any pc-monitor nodes exist
-    var hasPcMonitor = false;
-    for (var pci = 0; pci < this._nodes.length; pci++) {
-      if (this._nodes[pci].type === 'pc-monitor') { hasPcMonitor = true; break; }
-    }
-
-    // Count entries: title + signal levels + divider + detection states + divider + node statuses (+ PC Monitor entries)
-    var levels = this._visualization.contourLevels || [-30, -40, -50, -60, -70, -80];
-    var numEntries = levels.length + 1 + 3 + 1 + 2; // signal + divider + detection(3) + divider + node(2)
-    if (hasPcMonitor) numEntries += 2; // PC Monitor connected + disconnected
-
-    // Add tracked device entries if present
-    var hasTracked = this._trackedDevices && this._trackedDevices.length > 0;
-    if (hasTracked) {
-      numEntries += 1 + this._trackedDevices.length + 1 + 1; // divider + devices + confidence entry + trilateration entry
-    }
-
+    // Simplified legend: 4 items only
+    var numEntries = 4;
     var legendH = padY * 2 + titleH + numEntries * lineH;
 
     var lx = canvasW - legendW - 12;
@@ -1701,189 +1416,68 @@ var SignalMeshRenderer = (function() {
     ctx.stroke();
 
     // Title
-    ctx.font = SM_LEGEND_TITLE_FONT;
+    ctx.font = 'bold 11px "Inter", sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('Signal Strength', lx + padX, ly + padY);
+    ctx.fillText('\uBC94\uB840', lx + padX, ly + padY);
 
     var ey = ly + padY + titleH;
-    ctx.font = SM_LEGEND_FONT;
+    ctx.font = '11px "Inter", sans-serif';
 
-    // Signal strength levels
-    for (var i = 0; i < levels.length; i++) {
-      var level = levels[i];
-      var alphaFactor = 1.0 - (i / levels.length);
-      var swatchColor = smContourColor(level, 0.7 + 0.3 * alphaFactor);
-
-      // Gradient swatch
-      ctx.beginPath();
-      ctx.arc(lx + padX + 5, ey + 7, 4, 0, Math.PI * 2);
-      ctx.fillStyle = swatchColor;
-      ctx.fill();
-
-      // Label
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textBaseline = 'top';
-      ctx.fillText(level + ' dBm', lx + padX + 16, ey + 2);
-
-      ey += lineH;
-    }
-
-    // Divider
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    // 1. Red dot: "사람 감지"
+    ctx.save();
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 6;
     ctx.beginPath();
-    ctx.moveTo(lx + padX, ey + lineH / 2);
-    ctx.lineTo(lx + legendW - padX, ey + lineH / 2);
-    ctx.stroke();
+    ctx.arc(lx + padX + 6, ey + 8, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uC0AC\uB78C \uAC10\uC9C0', lx + padX + 18, ey + 8);
     ey += lineH;
 
-    // Detection states
-    var detectionStates = [
-      { color: 'rgba(100,100,100,0.5)', label: 'Absent (\uBBF8\uAC10\uC9C0)' },
-      { color: smNeonRgba(0.4), label: 'Still (\uC815\uC9C0)' },
-      { color: smNeonRgba(0.8), label: 'Active (\uD65C\uB3D9)' }
-    ];
-
-    for (var d = 0; d < detectionStates.length; d++) {
-      var ds = detectionStates[d];
-
-      ctx.beginPath();
-      ctx.arc(lx + padX + 5, ey + 7, 4, 0, Math.PI * 2);
-      ctx.fillStyle = ds.color;
-      ctx.fill();
-      if (d > 0) {
-        ctx.shadowColor = SM_NEON_GREEN;
-        ctx.shadowBlur = d === 2 ? 6 : 3;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-      }
-
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textBaseline = 'top';
-      ctx.fillText(ds.label, lx + padX + 16, ey + 2);
-
-      ey += lineH;
-    }
-
-    // Divider
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.beginPath();
-    ctx.moveTo(lx + padX, ey + lineH / 2);
-    ctx.lineTo(lx + legendW - padX, ey + lineH / 2);
-    ctx.stroke();
+    // 2. Cyan square: "PC Observer (연결)"
+    ctx.fillStyle = '#06b6d4';
+    ctx.fillRect(lx + padX + 1, ey + 3, 10, 10);
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx + padX + 1, ey + 3, 10, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PC Observer (\uC5F0\uACB0)', lx + padX + 18, ey + 8);
     ey += lineH;
 
-    // Node statuses (ESP32)
-    var nodeStatuses = [
-      { color: SM_NODE_STATUS_COLORS.connected, label: 'Connected' },
-      { color: SM_NODE_STATUS_COLORS.disconnected, label: 'Disconnected' }
-    ];
+    // 3. Gray square: "PC Observer (미연결)"
+    ctx.fillStyle = '#4b5563';
+    ctx.fillRect(lx + padX + 1, ey + 3, 10, 10);
+    ctx.strokeStyle = '#6b7280';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx + padX + 1, ey + 3, 10, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PC Observer (\uBBF8\uC5F0\uACB0)', lx + padX + 18, ey + 8);
+    ey += lineH;
 
-    for (var ns = 0; ns < nodeStatuses.length; ns++) {
-      var nst = nodeStatuses[ns];
-      ctx.fillStyle = nst.color;
-      ctx.fillRect(lx + padX + 1, ey + 3, 8, 8);
-
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textBaseline = 'top';
-      ctx.fillText(nst.label, lx + padX + 16, ey + 2);
-
-      ey += lineH;
-    }
-
-    // PC Monitor node statuses (if any exist)
-    if (hasPcMonitor) {
-      var pcStatuses = [
-        { color: SM_PC_NODE_COLORS.connected, label: 'PC Monitor (on)' },
-        { color: SM_PC_NODE_COLORS.disconnected, label: 'PC Monitor (off)' }
-      ];
-
-      for (var ps = 0; ps < pcStatuses.length; ps++) {
-        var pst = pcStatuses[ps];
-        // Draw a small monitor icon in the legend
-        ctx.fillStyle = pst.color;
-        ctx.fillRect(lx + padX, ey + 2, 10, 7);
-        ctx.fillRect(lx + padX + 3, ey + 9, 4, 2);
-
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.textBaseline = 'top';
-        ctx.fillText(pst.label, lx + padX + 16, ey + 2);
-
-        ey += lineH;
-      }
-    }
-
-    // Tracked devices section (if present)
-    if (hasTracked) {
-      // Divider
-      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-      ctx.beginPath();
-      ctx.moveTo(lx + padX, ey + lineH / 2);
-      ctx.lineTo(lx + legendW - padX, ey + lineH / 2);
-      ctx.stroke();
-      ey += lineH;
-
-      // Tracked person entries
-      for (var ti = 0; ti < this._trackedDevices.length; ti++) {
-        var td = this._trackedDevices[ti];
-        var tdColor = td.color || SM_NEON_GREEN;
-
-        // Colored dot
-        ctx.save();
-        ctx.shadowColor = tdColor;
-        ctx.shadowBlur = 4;
-        ctx.beginPath();
-        ctx.arc(lx + padX + 5, ey + 7, 4, 0, Math.PI * 2);
-        ctx.fillStyle = tdColor;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.restore();
-
-        // Label
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.textBaseline = 'top';
-        ctx.fillText(td.name || td.id || ('Device ' + (ti + 1)), lx + padX + 16, ey + 2);
-
-        ey += lineH;
-      }
-
-      // Confidence circle entry
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(lx + padX + 5, ey + 7, 5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textBaseline = 'top';
-      ctx.fillText('Confidence area', lx + padX + 16, ey + 2);
-      ey += lineH;
-
-      // Trilateration status entry
-      var connectedNodeCount = 0;
-      for (var tni = 0; tni < this._nodes.length; tni++) {
-        if (this._nodes[tni].status === 'connected') connectedNodeCount++;
-      }
-      var triActiveL = (connectedNodeCount + this._accessPoints.length) >= 3;
-      var triColorL = triActiveL ? '#4CAF50' : '#9E9E9E';
-
-      ctx.beginPath();
-      ctx.arc(lx + padX + 5, ey + 7, 3, 0, Math.PI * 2);
-      ctx.fillStyle = triColorL;
-      ctx.fill();
-
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textBaseline = 'top';
-      ctx.fillText(triActiveL ? 'Trilat. active' : 'Trilat. inactive', lx + padX + 16, ey + 2);
-      ey += lineH;
-    }
+    // 4. WiFi icon: "AP (라우터)"
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(lx + padX + 6, ey + 8, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fill();
+    // Mini WiFi arc
+    ctx.strokeStyle = 'rgba(245,158,11,0.6)';
+    ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(lx + padX + 6, ey + 6, 7, -Math.PI * 0.7, -Math.PI * 0.3);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('AP (\uB77C\uC6B0\uD130)', lx + padX + 18, ey + 8);
 
     ctx.restore();
   };

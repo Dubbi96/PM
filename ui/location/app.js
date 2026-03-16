@@ -1383,22 +1383,22 @@ class LocationApp {
     // Generate person positions from fusion zones (server / pc-rssi mode)
     if (data.fusion && data.fusion.zones) {
       var personPositions = [];
-      var colorIdx = 0;
-      var colors = ['#00ff88', '#3b82f6', '#f59e0b'];
       var self = this;
 
       Object.keys(data.fusion.zones).forEach(function(zoneId) {
         var zone = data.fusion.zones[zoneId];
         if (zone.occupied) {
-          var pos = self._getZoneCenter(zoneId);
-          if (pos) {
+          var basePos = self._getZoneCenter(zoneId);
+          if (basePos) {
+            // Add slight offset based on confidence (higher confidence = closer to center)
+            var conf = zone.confidence || 0.5;
             personPositions.push({
-              id: 'person-' + zoneId,
+              id: 'detected-' + zoneId,
               name: zone.name || zoneId,
-              position: pos,
-              confidence: zone.confidence || 0.5,
-              errorRadius: 2.0,
-              color: colors[colorIdx++ % colors.length]
+              position: basePos,
+              confidence: conf,
+              errorRadius: Math.max(1.0, 3.0 * (1 - conf)),  // smaller circle = more confident
+              color: '#ef4444'  // RED for all detected persons
             });
           }
         }
@@ -1423,7 +1423,7 @@ class LocationApp {
           position: { x: p.x, y: p.y },
           confidence: 0.8,
           errorRadius: 1.5,
-          color: p.color || '#00ff88'
+          color: '#ef4444'  // RED
         };
       });
 
@@ -1443,7 +1443,7 @@ class LocationApp {
 
           self.trilateration.trackDevice(person.id, rssiByNode, {
             name: person.id.replace('sim-person-', 'Person '),
-            color: person.color
+            color: '#ef4444'  // RED
           });
         });
 

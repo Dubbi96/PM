@@ -762,10 +762,10 @@
       this._nextPersonAddTime = now + randRange(20000, 60000);
     }
 
-    // Movement bounds
-    var boundsMinX = -3;
-    var boundsMaxX = 6;
-    var boundsMinY = -2;
+    // Movement bounds (match wider node layout)
+    var boundsMinX = -4;
+    var boundsMaxX = 4;
+    var boundsMinY = -1;
     var boundsMaxY = 5;
 
     for (var i = 0; i < this._simPersons.length; i++) {
@@ -773,53 +773,65 @@
 
       switch (person.state) {
         case 'idle':
-          // Pick a target and start walking
-          person.targetX = randRange(boundsMinX + 0.5, boundsMaxX - 0.5);
-          person.targetY = randRange(boundsMinY + 0.5, boundsMaxY - 0.5);
-          person.speed = randRange(0.3, 0.8);
+          // Pick a NEARBY target (max 3m away) for natural short walks
+          var maxStep = 3.0;
+          var angle = Math.random() * Math.PI * 2;
+          var stepDist = randRange(1.0, maxStep);
+          person.targetX = person.x + Math.cos(angle) * stepDist;
+          person.targetY = person.y + Math.sin(angle) * stepDist;
+          // Clamp target to bounds
+          person.targetX = Math.max(boundsMinX + 0.5, Math.min(boundsMaxX - 0.5, person.targetX));
+          person.targetY = Math.max(boundsMinY + 0.5, Math.min(boundsMaxY - 0.5, person.targetY));
+          person.speed = randRange(0.3, 0.6);  // natural walking speed
           person.state = 'walking';
           break;
 
         case 'walking':
-          // Move toward target
+          // Move toward target smoothly
           var dx = person.targetX - person.x;
           var dy = person.targetY - person.y;
           var dist = Math.sqrt(dx * dx + dy * dy);
 
-          if (dist < 0.15) {
+          if (dist < 0.1) {
             // Reached target, become stationary
             person.vx = 0;
             person.vy = 0;
             person.state = 'stationary';
-            person.pauseTimer = randRange(3, 10); // pause for 3-10 seconds
+            person.pauseTimer = randRange(4, 12); // pause for 4-12 seconds
           } else {
-            // Move toward target at configured speed
-            var moveSpeed = person.speed;
-            person.vx = (dx / dist) * moveSpeed;
-            person.vy = (dy / dist) * moveSpeed;
+            // Smooth velocity — gradually steer toward target (no instant direction change)
+            var targetVx = (dx / dist) * person.speed;
+            var targetVy = (dy / dist) * person.speed;
+            // Smooth steering (0.1 = very smooth turns, no snapping)
+            person.vx += (targetVx - person.vx) * 0.08;
+            person.vy += (targetVy - person.vy) * 0.08;
 
-            // Add slight random drift for natural movement
-            person.vx += gaussianRandom() * 0.05;
-            person.vy += gaussianRandom() * 0.05;
+            // Very subtle drift (barely noticeable)
+            person.vx += gaussianRandom() * 0.008;
+            person.vy += gaussianRandom() * 0.008;
 
             // Update position
             person.x += person.vx * dt;
             person.y += person.vy * dt;
 
-            // Clamp to bounds
-            person.x = Math.max(boundsMinX, Math.min(boundsMaxX, person.x));
-            person.y = Math.max(boundsMinY, Math.min(boundsMaxY, person.y));
+            // Soft bounds (decelerate near edges instead of hard clamp)
+            if (person.x < boundsMinX) { person.x = boundsMinX; person.vx = Math.abs(person.vx) * 0.5; }
+            if (person.x > boundsMaxX) { person.x = boundsMaxX; person.vx = -Math.abs(person.vx) * 0.5; }
+            if (person.y < boundsMinY) { person.y = boundsMinY; person.vy = Math.abs(person.vy) * 0.5; }
+            if (person.y > boundsMaxY) { person.y = boundsMaxY; person.vy = -Math.abs(person.vy) * 0.5; }
           }
           break;
 
         case 'stationary':
-          // Wait at current position, with tiny idle drift
-          person.x += gaussianRandom() * 0.005;
-          person.y += gaussianRandom() * 0.005;
+          // Minimal micro-drift (person breathing/shifting weight)
+          person.x += gaussianRandom() * 0.002;
+          person.y += gaussianRandom() * 0.002;
+          // Velocity decays to zero
+          person.vx *= 0.9;
+          person.vy *= 0.9;
 
           person.pauseTimer -= dt;
           if (person.pauseTimer <= 0) {
-            // Done pausing, pick a new target
             person.state = 'idle';
           }
           break;

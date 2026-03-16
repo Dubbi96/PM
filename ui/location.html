@@ -1313,22 +1313,16 @@
                       variant: 'caption',
                       sx: { fontWeight: 600, fontSize: '0.7rem', color: '#e2e8f0' }
                     }, obs.id),
-                    secondary: React.createElement(Stack, { direction: 'row', spacing: 1 },
-                      React.createElement(Typography, {
-                        variant: 'caption',
-                        sx: { color: obs.disturbed ? '#00ff88' : '#64748b', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-                      }, (obs.rssi || '--') + ' dBm'),
-                      React.createElement(Typography, {
-                        variant: 'caption',
-                        sx: { color: '#64748b', fontSize: '0.6rem' }
-                      }, '\u0394' + (obs.delta != null && typeof obs.delta === 'number' ? obs.delta.toFixed(1) : (obs.delta != null ? String(obs.delta) : '--')))
-                    )
+                    secondary: React.createElement(Typography, {
+                      variant: 'caption',
+                      sx: { color: '#64748b', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+                    }, (obs.rssi || '--') + ' dBm')
                   }),
                   // Disturbed indicator
                   obs.disturbed ? React.createElement(Chip, {
                     label: '\uAD50\uB780',
                     size: 'small',
-                    sx: { fontSize: '0.5rem', height: 16, backgroundColor: 'rgba(0,255,136,0.12)', color: '#00ff88' }
+                    sx: { fontSize: '0.5rem', height: 16, backgroundColor: 'rgba(245,158,11,0.15)', color: '#f59e0b' }
                   }) : null
                 );
               })
@@ -1502,7 +1496,7 @@
                   sx: {
                     mb: 0.5,
                     backgroundColor: '#111827',
-                    borderLeft: '3px solid ' + (zone.occupied ? '#00ff88' : '#1e293b'),
+                    borderLeft: '3px solid ' + (zone.occupied ? '#ef4444' : '#1e293b'),
                     transition: 'all 0.3s',
                   }
                 },
@@ -1516,8 +1510,8 @@
                         size: 'small',
                         sx: {
                           fontSize: '0.5rem', height: 18,
-                          backgroundColor: zone.occupied ? 'rgba(0,255,136,0.12)' : 'rgba(255,255,255,0.04)',
-                          color: zone.occupied ? '#00ff88' : '#475569',
+                          backgroundColor: zone.occupied ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.04)',
+                          color: zone.occupied ? '#ef4444' : '#475569',
                         }
                       })
                     )
@@ -1554,7 +1548,7 @@
                   sx: {
                     mb: 1,
                     backgroundColor: '#111827',
-                    borderLeft: '3px solid ' + (device.color || '#00ff88'),
+                    borderLeft: '3px solid #ef4444',
                     transition: 'border-color 0.3s',
                     '&:hover': { borderColor: 'rgba(255,255,255,0.12)' }
                   }
@@ -1565,8 +1559,8 @@
                         React.createElement(Box, {
                           sx: {
                             width: 10, height: 10, borderRadius: '50%',
-                            backgroundColor: device.color || '#00ff88',
-                            boxShadow: '0 0 6px ' + (device.color || '#00ff88'),
+                            backgroundColor: '#ef4444',
+                            boxShadow: '0 0 6px #ef4444',
                           }
                         }),
                         React.createElement(Typography, {
@@ -1580,8 +1574,8 @@
                         sx: {
                           fontSize: '0.55rem',
                           height: 18,
-                          backgroundColor: 'rgba(0,255,136,0.12)',
-                          color: '#00ff88',
+                          backgroundColor: 'rgba(239,68,68,0.12)',
+                          color: '#ef4444',
                         }
                       })
                     ),

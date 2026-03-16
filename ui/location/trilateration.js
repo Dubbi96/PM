@@ -33,7 +33,7 @@
     this.referenceRssi     = tri.referenceRssi     || -30;    // dBm at referenceDistance
     this.positionSmoothing = (tri.positionSmoothing !== undefined)
                                ? tri.positionSmoothing
-                               : 0.4;
+                               : 0.25;  // stronger smoothing: 25% new + 75% previous
 
     this.config = config;
 

@@ -20,25 +20,25 @@
   "nodes": [
     {
       "id": "pc-node-1",
-      "name": "PC Observer 1",
-      "x": -3.0,
+      "name": "PC 1",
+      "x": -5.0,
       "y": 0.0,
       "type": "pc-monitor",
       "status": "disconnected"
     },
     {
       "id": "pc-node-2",
-      "name": "PC Observer 2",
-      "x": 3.0,
-      "y": -2.0,
+      "name": "PC 2",
+      "x": 5.0,
+      "y": 0.0,
       "type": "pc-monitor",
       "status": "disconnected"
     },
     {
       "id": "pc-node-3",
-      "name": "PC Observer 3",
+      "name": "PC 3",
       "x": 0.0,
-      "y": 4.0,
+      "y": 6.0,
       "type": "pc-monitor",
       "status": "disconnected"
     }
@@ -63,7 +63,7 @@
     "confidenceRadius": 2.0
   },
   "visualization": {
-    "meshRadius": 8.0,
+    "meshRadius": 10.0,
     "meshOpacity": 0.6,
     "showFresnelZone": true,
     "showSignalContours": true,

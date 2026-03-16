@@ -99,9 +99,9 @@
 
     // ── Simulated observers ──────────────────────────────────────────
     this.observers = [
-      { id: 'sim-pc-1', name: 'PC Node 1', x: -2, y: 0, platform: 'darwin' },
-      { id: 'sim-pc-2', name: 'PC Node 2', x: 4, y: -1, platform: 'windows' },
-      { id: 'sim-pc-3', name: 'PC Node 3', x: 1, y: 4, platform: 'linux' }
+      { id: 'sim-pc-1', name: 'PC 1', x: -5, y: 0, platform: 'darwin' },
+      { id: 'sim-pc-2', name: 'PC 2', x: 5, y: 0, platform: 'windows' },
+      { id: 'sim-pc-3', name: 'PC 3', x: 0, y: 6, platform: 'linux' }
     ];
 
     // ── AP info ──────────────────────────────────────────────────────
@@ -438,10 +438,10 @@
     }
 
     // Movement bounds (room dimensions)
-    var boundsMinX = -3;
+    var boundsMinX = -6;
     var boundsMaxX = 6;
     var boundsMinY = -2;
-    var boundsMaxY = 5;
+    var boundsMaxY = 7;
 
     for (var i = 0; i < this.persons.length; i++) {
       var person = this.persons[i];
@@ -507,12 +507,12 @@
     var colors = ['#00ff88', '#3b82f6', '#f59e0b', '#ef4444'];
     this.persons.push({
       id: 'sim-person-' + id,
-      x: randRange(-1, 3),
-      y: randRange(-1, 3),
+      x: randRange(-4, 4),
+      y: randRange(-1, 5),
       vx: 0,
       vy: 0,
-      targetX: randRange(-1, 4),
-      targetY: randRange(-1, 4),
+      targetX: randRange(-5, 5),
+      targetY: randRange(-1, 6),
       speed: randRange(0.3, 0.8),
       state: 'idle',
       pauseTimer: 0,
