@@ -156,7 +156,9 @@ class FusionEngine:
         disturbed = [oid for oid, obs in active.items() if obs.is_disturbed()]
 
         # Presence
-        if len(disturbed) == 0:
+        if len(active) == 0:
+            presence = "waiting"
+        elif len(disturbed) == 0:
             presence = "absent"
         else:
             max_var = max(
@@ -206,7 +208,12 @@ class FusionEngine:
                 "disturbed": obs.is_disturbed(),
             }
 
-        accuracy = "approximate" if len(active) >= 2 else "low"
+        if len(active) == 0:
+            accuracy = "none"
+        elif len(active) >= 2:
+            accuracy = "approximate"
+        else:
+            accuracy = "low"
 
         return {
             "timestamp_ms": now_ms,
@@ -235,7 +242,7 @@ class ObserverServer(BaseHTTPRequestHandler):
     start_time: float = time.time()
     auto_calibrate: bool = False
     _auto_calibrate_triggered: bool = False
-    ui_dir: str = os.path.join(os.path.dirname(__file__), "..", "ui")
+    ui_dir: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui")
     verbose: bool = False
     _lock: threading.Lock = threading.Lock()
 
@@ -409,6 +416,7 @@ class ObserverServer(BaseHTTPRequestHandler):
         if path in ("/", ""):
             self.send_response(302)
             self.send_header("Location", "/location.html")
+            self._add_cors_headers()
             self.end_headers()
             return
 
@@ -423,14 +431,15 @@ class ObserverServer(BaseHTTPRequestHandler):
         file_path = os.path.join(ui_dir, path)
         file_path = os.path.abspath(file_path)
 
-        # Ensure we stay within the UI directory
-        if not file_path.startswith(ui_dir):
+        # Ensure we stay within the UI directory (add os.sep to prevent prefix match on sibling dirs)
+        if not file_path.startswith(ui_dir + os.sep) and file_path != ui_dir:
             self._send_json({"error": "forbidden"}, 403)
             return
 
         if not os.path.isfile(file_path):
             self.send_response(404)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self._add_cors_headers()
             self.end_headers()
             self.wfile.write(f"404 Not Found: {path}\n".encode())
             return
@@ -598,6 +607,9 @@ def main():
     print(f"  UI dir:          {ObserverServer.ui_dir}")
     print(f"  Auto-calibrate:  {args.auto_calibrate}")
     print(f"  Verbose:         {args.verbose}")
+    print()
+    print("No observers connected yet. To add a PC observer:")
+    print(f"  python3 tools/pc-observer.py --id pc-node-1 --server http://localhost:{args.port}")
     print()
 
     # Start reaper thread

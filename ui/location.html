@@ -320,6 +320,7 @@
   // ---- Presence state metadata ----
   const PRESENCE_META = {
     absent:        { label: '\uBD80\uC7AC', color: '#64748b', bgColor: 'rgba(100,116,139,0.12)', borderColor: 'rgba(100,116,139,0.3)', neon: false, pulse: false },
+    waiting:       { label: '\uB300\uAE30 \uC911', color: '#fbbf24', bgColor: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.3)', neon: false, pulse: false },
     present_still: { label: '\uC815\uC9C0 \uAC10\uC9C0', color: '#00ff88', bgColor: 'rgba(0,255,136,0.12)', borderColor: 'rgba(0,255,136,0.3)', neon: true, pulse: false },
     active:        { label: '\uD65C\uB3D9 \uAC10\uC9C0', color: '#00ff88', bgColor: 'rgba(0,255,136,0.18)', borderColor: 'rgba(0,255,136,0.5)', neon: true, pulse: true },
   };
@@ -392,7 +393,7 @@
                 className: neon ? 'neon-green' : '',
                 sx: {
                   fontWeight: 800,
-                  fontSize: '1.35rem',
+                  fontSize: '1.2rem',
                   lineHeight: 1.2,
                   color: neon ? '#00ff88' : '#e2e8f0',
                   animation: neon ? 'neonTextPulse 3s ease-in-out infinite' : 'none',
@@ -696,7 +697,7 @@
           React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Variance Threshold'),
           React.createElement(Typography, {
             variant: 'caption',
-            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
           }, (detection.presenceVarianceThreshold || 0.5) + ' dBm\u00B2')
         ),
 
@@ -705,7 +706,7 @@
           React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Smoothing Factor'),
           React.createElement(Typography, {
             variant: 'caption',
-            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
           }, String(detection.smoothingFactor || 0.85))
         ),
 
@@ -714,7 +715,7 @@
           React.createElement(Typography, { variant: 'caption', sx: { color: '#94a3b8', fontSize: '0.65rem' } }, 'Window Size'),
           React.createElement(Typography, {
             variant: 'caption',
-            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600 }
+            sx: { color: '#e2e8f0', fontFamily: '"JetBrains Mono", monospace', fontSize: '0.65rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
           }, (detection.windowSeconds || 15) + 's')
         )
       )
@@ -751,6 +752,7 @@
     const [observers, setObservers] = useState({});
     const [fusionResult, setFusionResult] = useState(null);
     const [observerCount, setObserverCount] = useState(0);
+    const [waitingMessage, setWaitingMessage] = useState('');
 
     // Refs for canvases
     const floorplanContainerRef = useRef(null);
@@ -873,7 +875,7 @@
         },
 
         setPresenceState: function(state) {
-          // 'absent' | 'present_still' | 'active'
+          // 'absent' | 'waiting' | 'present_still' | 'active'
           if (PRESENCE_META[state]) {
             setPresenceState(state);
           }
@@ -937,6 +939,10 @@
         setFusionResult: function(result) {
           setFusionResult(result || null);
         },
+
+        setWaitingMessage: function(msg) {
+          setWaitingMessage(msg || '');
+        },
       };
 
       return () => { delete window.RuViewDashboard; };
@@ -969,7 +975,7 @@
     const getSourceLabel = (m) => {
       switch (m) {
         case 'simulation': return 'Simulation';
-        case 'pc-rssi': return 'PC Observer';
+        case 'pc-rssi': return observerCount > 0 ? 'PC Observer (' + observerCount + ')' : 'PC Observer (\uB300\uAE30)';
         case 'rssi+csi': return 'ESP32 CSI';
         default: return 'Simulation';
       }
@@ -988,7 +994,7 @@
             md: '"header header header" "sidebar canvas detail" "footer footer footer"',
           },
           gridTemplateRows: { xs: 'auto auto 1fr auto auto', md: 'auto 1fr auto' },
-          gridTemplateColumns: { xs: '1fr', md: '280px 1fr 320px', lg: '280px 1fr 340px' },
+          gridTemplateColumns: { xs: '1fr', md: '260px 1fr 320px', lg: '280px 1fr 340px' },
           height: '100vh',
           backgroundColor: '#0a0f1a',
         }
@@ -1185,7 +1191,7 @@
                       variant: 'h5',
                       sx: {
                         fontWeight: 800,
-                        fontSize: '1.4rem',
+                        fontSize: '1.3rem',
                         lineHeight: 1.2,
                         color: '#e2e8f0',
                         fontFamily: '"JetBrains Mono", monospace',
@@ -1258,15 +1264,22 @@
             elevation: 0,
             sx: { backgroundColor: '#111827', borderRadius: '12px', overflow: 'hidden' }
           },
-            React.createElement(List, { dense: true, disablePadding: true },
-              allNodes.map(node =>
-                React.createElement(NodeItem, {
-                  key: node.id,
-                  node: node,
-                  status: nodeStatuses[node.id] || (node.status === 'connected' ? 'connected' : 'disconnected'),
-                })
-              )
-            )
+            allNodes.length === 0
+              ? React.createElement(Box, { sx: { py: 2, px: 1.5, textAlign: 'center' } },
+                  React.createElement(Typography, {
+                    variant: 'caption',
+                    sx: { color: '#64748b', fontSize: '0.7rem', fontStyle: 'italic' }
+                  }, '\uC5F0\uACB0\uB41C \uB178\uB4DC \uC5C6\uC74C')
+                )
+              : React.createElement(List, { dense: true, disablePadding: true },
+                  allNodes.map(node =>
+                    React.createElement(NodeItem, {
+                      key: node.id,
+                      node: node,
+                      status: nodeStatuses[node.id] || (node.status === 'connected' ? 'connected' : 'disconnected'),
+                    })
+                  )
+                )
           ),
 
           // Observer status header
@@ -1303,7 +1316,7 @@
                     secondary: React.createElement(Stack, { direction: 'row', spacing: 1 },
                       React.createElement(Typography, {
                         variant: 'caption',
-                        sx: { color: obs.disturbed ? '#00ff88' : '#64748b', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace' }
+                        sx: { color: obs.disturbed ? '#00ff88' : '#64748b', fontSize: '0.6rem', fontFamily: '"JetBrains Mono", monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
                       }, (obs.rssi || '--') + ' dBm'),
                       React.createElement(Typography, {
                         variant: 'caption',
@@ -1404,7 +1417,32 @@
               position: 'relative',
               backgroundColor: '#0a0e18',
             }
-          }),
+          },
+            // Waiting overlay
+            presenceState === 'waiting' ? React.createElement(Box, {
+              sx: {
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                zIndex: 10,
+              }
+            },
+              React.createElement(Typography, {
+                variant: 'h6',
+                sx: { color: '#fbbf24', fontWeight: 600, mb: 1 }
+              }, '\uB300\uAE30 \uC911'),
+              React.createElement(Typography, {
+                variant: 'body2',
+                sx: { color: '#94a3b8', fontSize: '0.8rem' }
+              }, waitingMessage || 'PC Observer\uB97C \uC5F0\uACB0\uD574\uC8FC\uC138\uC694'),
+              React.createElement(Typography, {
+                variant: 'caption',
+                sx: { color: '#475569', fontSize: '0.7rem', mt: 1, display: 'block' }
+              }, 'python3 tools/pc-observer.py --id pc-node-1 --server http://\uC11C\uBC84IP:8080')
+            ) : null
+          ),
 
           // Simulation notice
           mode === 'simulation' ? React.createElement(Alert, {

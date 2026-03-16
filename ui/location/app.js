@@ -32,7 +32,7 @@ class LocationApp {
       serverStatus: 'offline',  // online | degraded | offline
 
       // Presence detection (replaces zone occupancy)
-      presence: 'absent',       // absent | present_still | active
+      presence: 'absent',       // absent | waiting | present_still | active
       confidence: 0,
       motionScore: 0,
 
@@ -177,30 +177,9 @@ class LocationApp {
         console.warn('[LocationApp] LocationAPI not loaded');
       }
 
-      // 5-8. In simulation mode, skip all server communication and just start the simulator
-      if (this.state.mode === 'simulation') {
-        console.log('[LocationApp] Simulation mode — skipping server health, WS, and polling');
-        this.state.serverStatus = 'offline';
-        this._startSimulation();
-      } else if (this.state.mode === 'pc-rssi') {
-        console.log('[LocationApp] PC-RSSI mode — starting observer polling');
-        this._startPcRssiPolling();
-      } else {
-        // 5. Check server health
-        await this._checkServerHealth();
-
-        // 6. Try WebSocket, fall back to polling
-        var wsConnected = await this._connectWebSocket();
-        if (!wsConnected) {
-          console.log('[LocationApp] WebSocket unavailable, falling back to polling');
-          this._startPolling();
-        }
-
-        // 7. If server offline, start health retry loop
-        if (this.state.serverStatus === 'offline') {
-          this._startHealthRetry();
-        }
-      }
+      // 5-8. Auto-detect server type and choose mode accordingly
+      //   Priority: observer-server (/api/observers/status) → backend (/health/health) → simulation
+      await this._autoDetectServerMode();
 
       // 9. Start render loop
       this._startRenderLoop();
@@ -208,7 +187,10 @@ class LocationApp {
       // 10. Initial UI paint
       this._fullUiUpdate();
 
-      this._setStatusText('');
+      // Clear init status text, but preserve waiting message if in waiting state
+      if (this.state.presence !== 'waiting') {
+        this._setStatusText('');
+      }
       console.log('[LocationApp] Initialization complete');
     } catch (err) {
       console.error('[LocationApp] Init failed:', err);
@@ -357,14 +339,14 @@ class LocationApp {
     var dash = window.RuViewDashboard;
     if (!dash) return;
 
-    // Presence badge (ABSENT / PRESENT_STILL / ACTIVE)
+    // Presence badge (ABSENT / WAITING / PRESENT_STILL / ACTIVE)
     if (typeof dash.setPresenceState === 'function') {
       dash.setPresenceState(this.state.presence);
     }
 
-    // Person count — 0 if absent, 1 if present_still or active
+    // Person count — 0 if absent or waiting, 1 if present_still or active
     if (typeof dash.setPersonCount === 'function') {
-      var count = this.state.presence === 'absent' ? 0 : 1;
+      var count = (this.state.presence === 'absent' || this.state.presence === 'waiting') ? 0 : 1;
       dash.setPersonCount(count);
     }
 
@@ -666,6 +648,140 @@ class LocationApp {
         }
       }
     }, this._HEALTH_RETRY_MS);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-detect server mode
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Auto-detect which server is available and set the mode accordingly.
+   * Priority order:
+   *   1. /api/observers/status  → pc-rssi mode (observer-server.py)
+   *   2. /health/health         → rssi+csi mode (backend server)
+   *   3. No server reachable    → simulation mode (fallback)
+   *
+   * When pc-rssi mode is detected but no observers are connected,
+   * the dashboard shows a "waiting" state instead of fake simulation data.
+   */
+  async _autoDetectServerMode() {
+    var self = this;
+
+    // --- Try observer-server first (/api/observers/status) ---
+    try {
+      var obsResp = await fetch('/api/observers/status');
+      if (obsResp.ok) {
+        var obsData = await obsResp.json();
+        console.log('[LocationApp] Observer server detected — switching to pc-rssi mode');
+        this.state.mode = 'pc-rssi';
+        this.state.source = 'pc-rssi';
+        this.state.serverStatus = 'online';
+        this.state.connected = true;
+
+        // Check if any observers are actually connected
+        var observerCount = 0;
+        if (obsData.observers) {
+          observerCount = Object.keys(obsData.observers).length;
+        } else if (typeof obsData.count === 'number') {
+          observerCount = obsData.count;
+        }
+
+        if (observerCount > 0) {
+          console.log('[LocationApp] ' + observerCount + ' observer(s) connected — starting polling');
+          this._startPcRssiPolling();
+        } else {
+          console.log('[LocationApp] No observers connected — showing waiting state');
+          this._setWaitingState();
+          this._startPcRssiPolling();  // still poll so we detect when observers connect
+        }
+        return;
+      }
+    } catch (_) {
+      // observer-server not available, try next
+    }
+
+    // --- Try regular backend (/health/health) ---
+    try {
+      var healthResp = await fetch('/health/health');
+      if (healthResp.ok) {
+        var healthData = await healthResp.json();
+        console.log('[LocationApp] Backend server detected — switching to rssi+csi mode');
+        this.state.mode = 'rssi+csi';
+        this.state.source = 'esp32-csi';
+        this.state.serverStatus = 'online';
+        this.state.connected = true;
+
+        // Check server health for source info
+        await this._checkServerHealth();
+
+        // Try WebSocket, fall back to polling
+        var wsConnected = await this._connectWebSocket();
+        if (!wsConnected) {
+          console.log('[LocationApp] WebSocket unavailable, falling back to polling');
+          this._startPolling();
+        }
+
+        if (this.state.serverStatus === 'offline') {
+          this._startHealthRetry();
+        }
+        return;
+      }
+    } catch (_) {
+      // backend not available either
+    }
+
+    // --- No server reachable — simulation mode ---
+    console.log('[LocationApp] No server reachable — starting simulation mode');
+    this.state.mode = 'simulation';
+    this.state.source = 'simulated';
+    this.state.serverStatus = 'offline';
+    this.state.connected = false;
+    this._startSimulation();
+  }
+
+  /**
+   * Set the "waiting" state — server is available but no observers are connected yet.
+   * Shows "대기 중" instead of fake simulation data.
+   */
+  _setWaitingState() {
+    this.state.presence = 'waiting';
+    this.state.confidence = 0;
+    this.state.motionScore = 0;
+    this.state.observers = {};
+    this.state.observerCount = 0;
+    this.state.fusionResult = null;
+    this.state.events = [];
+
+    // Reset RSSI metrics to neutral
+    this.state.rssi = {
+      current: 0,
+      baseline: 0,
+      variance: 0,
+      snr: 0
+    };
+
+    this.state.spectral = {
+      breathingPower: 0,
+      motionPower: 0,
+      dominantFreq: 0,
+      changePoints: 0
+    };
+
+    // Update dashboard with waiting message
+    var dash = window.RuViewDashboard;
+    if (dash) {
+      if (typeof dash.setPresenceState === 'function') {
+        dash.setPresenceState('waiting');
+      }
+      if (typeof dash.setConfidence === 'function') {
+        dash.setConfidence(0);
+      }
+      if (typeof dash.setPersonCount === 'function') {
+        dash.setPersonCount(0);
+      }
+    }
+
+    this._setStatusText('PC Observer\uB97C \uC5F0\uACB0\uD574\uC8FC\uC138\uC694');
   }
 
   // ---------------------------------------------------------------------------
@@ -1145,6 +1261,7 @@ class LocationApp {
   _presenceLabel(presence) {
     switch (presence) {
       case 'absent': return '\uBD80\uC7AC';
+      case 'waiting': return '\uB300\uAE30 \uC911';
       case 'present_still': return '\uC815\uC9C0';
       case 'active': return '\uD65C\uB3D9';
       default: return presence;
@@ -1295,30 +1412,54 @@ class LocationApp {
     console.log('[LocationApp] Starting PC-RSSI polling');
 
     this._pcRssiInterval = setInterval(function() {
-      // Fetch fusion data from server
-      fetch('/api/observers/fusion')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          self._processObserverData({
-            observers: data.observers_rssi || {},
-            fusion: data,
-            persons: []
-          });
-        })
-        .catch(function() { /* server not available */ });
-
-      // Also fetch observer status
+      // Fetch observer status first to check if any observers are connected
       fetch('/api/observers/status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
+          var observerCount = 0;
           if (data.observers) {
+            observerCount = Object.keys(data.observers).length;
             var dash = window.RuViewDashboard;
             if (dash && typeof dash.setObservers === 'function') {
               dash.setObservers(data.observers);
             }
           }
+          self.state.observerCount = observerCount;
+
+          if (observerCount === 0) {
+            // No observers connected — show waiting state, no fake data
+            if (self.state.presence !== 'waiting') {
+              self._setWaitingState();
+              self._fullUiUpdate();
+            }
+            return;
+          }
+
+          // Observers are connected — clear waiting state if needed
+          if (self.state.presence === 'waiting') {
+            self.state.presence = 'absent';
+            self._setStatusText('');
+            console.log('[LocationApp] Observer(s) connected — leaving waiting state');
+          }
+
+          // Fetch fusion data from server
+          fetch('/api/observers/fusion')
+            .then(function(r) { return r.json(); })
+            .then(function(fusionData) {
+              self._processObserverData({
+                observers: fusionData.observers_rssi || {},
+                fusion: fusionData,
+                persons: []
+              });
+            })
+            .catch(function() { /* fusion endpoint not available yet */ });
         })
-        .catch(function() {});
+        .catch(function() {
+          // Server not available — may have gone down
+          self.state.connected = false;
+          self.state.serverStatus = 'offline';
+          self._updateStatusBanner();
+        });
     }, 2000);
   }
 
@@ -1368,6 +1509,7 @@ class LocationApp {
         this.state.source = 'pc-rssi';
         this.state.mode = 'pc-rssi';
         this._stopSimulation();
+        this._setWaitingState();  // start in waiting state until observers respond
         this._startPcRssiPolling();
         break;
 

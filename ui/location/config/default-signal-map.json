@@ -17,32 +17,7 @@
       "channel": 6
     }
   ],
-  "nodes": [
-    {
-      "id": "node-esp32-1",
-      "name": "ESP32-S3 #1",
-      "x": 3.0,
-      "y": 2.0,
-      "type": "esp32-s3",
-      "status": "disconnected"
-    },
-    {
-      "id": "node-pc-1",
-      "name": "PC Monitor #1",
-      "x": -2.0,
-      "y": 3.5,
-      "type": "pc-monitor",
-      "status": "disconnected"
-    },
-    {
-      "id": "node-esp32-2",
-      "name": "ESP32-S3 #2",
-      "x": 5.0,
-      "y": -1.0,
-      "type": "esp32-s3",
-      "status": "disconnected"
-    }
-  ],
+  "nodes": [],
   "detection": {
     "presenceVarianceThreshold": 0.5,
     "motionEnergyThreshold": 0.1,
@@ -53,7 +28,7 @@
     "cusumThreshold": 3.0
   },
   "trilateration": {
-    "enabled": true,
+    "enabled": false,
     "minNodes": 3,
     "pathLossExponent": 3.0,
     "referenceDistance": 1.0,
