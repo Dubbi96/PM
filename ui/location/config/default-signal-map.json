@@ -9,45 +9,29 @@
   "accessPoints": [
     {
       "id": "ap-main",
-      "name": "Main Router",
+      "name": "AP",
       "x": 0.0,
       "y": 0.0,
       "txPower": 20,
-      "frequency": 2437,
-      "channel": 6
+      "frequency": 2412,
+      "channel": 1
     }
   ],
   "nodes": [
     {
-      "id": "esp32-node-1",
-      "name": "ESP32-S3",
+      "id": "pc-node-1",
+      "name": "PC",
       "x": 3.0,
       "y": 0.0,
+      "type": "pc-monitor",
+      "status": "disconnected"
+    },
+    {
+      "id": "esp32-node-1",
+      "name": "ESP32-S3",
+      "x": 6.0,
+      "y": 0.0,
       "type": "esp32-s3",
-      "status": "disconnected"
-    },
-    {
-      "id": "pc-node-1",
-      "name": "PC 1",
-      "x": -5.0,
-      "y": 0.0,
-      "type": "pc-monitor",
-      "status": "disconnected"
-    },
-    {
-      "id": "pc-node-2",
-      "name": "PC 2",
-      "x": 5.0,
-      "y": 0.0,
-      "type": "pc-monitor",
-      "status": "disconnected"
-    },
-    {
-      "id": "pc-node-3",
-      "name": "PC 3",
-      "x": 0.0,
-      "y": 6.0,
-      "type": "pc-monitor",
       "status": "disconnected"
     }
   ],
