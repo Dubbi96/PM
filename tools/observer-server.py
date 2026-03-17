@@ -241,8 +241,22 @@ class FusionEngine:
 
         # -- Estimated position (weighted centroid of disturbed observers) ----
         # Default observer node positions (metres, arbitrary coordinate frame).
-        # AP is assumed at the origin (0, 0).
-        _OBSERVER_POSITIONS = [(-5, 0), (5, 0), (0, 6), (3, 0)]
+        # Load node positions from config file (if available)
+        _config_positions = {}
+        try:
+            import os as _os
+            _cfg_path = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), '..', 'ui', 'location', 'config', 'default-signal-map.json'
+            )
+            with open(_cfg_path) as _f:
+                _cfg = __import__('json').load(_f)
+                for _n in _cfg.get('nodes', []):
+                    _config_positions[_n['id']] = (_n['x'], _n['y'])
+                    _config_positions[_n.get('name', '')] = (_n['x'], _n['y'])
+        except Exception:
+            pass
+        # Fallback positions if config not available
+        _FALLBACK_POSITIONS = [(3, 0), (6, 0), (0, 4), (-3, 0)]
 
         estimated_position = None
         if disturbed:
@@ -256,7 +270,11 @@ class FusionEngine:
                 if not obs:
                     continue
                 idx = sorted_active_ids.index(obs_id) if obs_id in sorted_active_ids else 0
-                node_x, node_y = _OBSERVER_POSITIONS[min(idx, len(_OBSERVER_POSITIONS) - 1)]
+                # Look up position from config by ID, then fallback by index
+                if obs_id in _config_positions:
+                    node_x, node_y = _config_positions[obs_id]
+                else:
+                    node_x, node_y = _FALLBACK_POSITIONS[min(idx, len(_FALLBACK_POSITIONS) - 1)]
 
                 # Use VARIANCE as weight (not delta!)
                 variance = obs.aggregate_variance()
